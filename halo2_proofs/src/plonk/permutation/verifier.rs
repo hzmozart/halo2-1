@@ -30,7 +30,7 @@ pub struct CommonEvaluated<C: CurveAffine> {
 
 #[derive(Debug)]
 pub struct Evaluated<C: CurveAffine> {
-    sets: Vec<EvaluatedSet<C>>,
+    pub sets: Vec<EvaluatedSet<C>>,
 }
 
 impl Argument {
