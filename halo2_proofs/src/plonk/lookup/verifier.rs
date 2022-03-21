@@ -120,6 +120,7 @@ impl<C: CurveAffine> Evaluated<C> {
                     .iter()
                     .map(|expression| {
                         println!("expression: {:?}", expression);
+                        println!("length of evals: {:?} {:?} {:?}", fixed_evals.len(), advice_evals.len(), instance_evals.len());
                         expression.evaluate(
                             &|scalar| scalar,
                             &|_| panic!("virtual selectors are removed during optimization"),
