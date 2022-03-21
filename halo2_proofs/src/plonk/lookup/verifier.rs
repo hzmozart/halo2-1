@@ -14,14 +14,14 @@ use ff::Field;
 
 #[derive(Debug)]
 pub struct PermutationCommitments<C: CurveAffine> {
-    permuted_input_commitment: C,
-    permuted_table_commitment: C,
+    pub permuted_input_commitment: C,
+    pub permuted_table_commitment: C,
 }
 
 #[derive(Debug)]
 pub struct Committed<C: CurveAffine> {
-    permuted: PermutationCommitments<C>,
-    product_commitment: C,
+    pub permuted: PermutationCommitments<C>,
+    pub product_commitment: C,
 }
 
 #[derive(Debug)]
