@@ -512,7 +512,7 @@ impl<F: Field> Expression<F> {
                 query_index,
                 column_index,
                 rotation,
-            } => advice_column(*query_index, *column_index, *rotation),
+            } => { println!("advice_query_index: {:?}", query_index); advice_column(*query_index, *column_index, *rotation) },
             Expression::Instance {
                 query_index,
                 column_index,
