@@ -32,7 +32,7 @@ pub struct Params<C: CurveAffine> {
 #[derive(Debug)]
 pub struct ParamsVerifier<E: Engine> {
     pub(crate) k: u32,
-    pub(crate) n: u64,
+    pub n: u64,
     pub(crate) g1: E::G1Affine,
     pub(crate) g2: E::G2Affine,
     pub(crate) s_g2: E::G2Affine,

@@ -18,6 +18,7 @@ pub struct PermutationCommitments<C: CurveAffine> {
     permuted_table_commitment: C,
 }
 
+#[derive(Debug)]
 pub struct Committed<C: CurveAffine> {
     permuted: PermutationCommitments<C>,
     product_commitment: C,
@@ -52,7 +53,7 @@ impl<F: FieldExt> Argument<F> {
 }
 
 impl<C: CurveAffine> PermutationCommitments<C> {
-    pub(in crate::plonk) fn read_product_commitment<
+    pub fn read_product_commitment<
         E: EncodedChallenge<C>,
         T: TranscriptRead<C, E>,
     >(

@@ -15,6 +15,7 @@ pub struct Committed<C: CurveAffine> {
     permutation_product_commitments: Vec<C>,
 }
 
+#[derive(Debug)]
 pub struct EvaluatedSet<C: CurveAffine> {
     permutation_product_commitment: C,
     permutation_product_eval: C::Scalar,
@@ -24,9 +25,10 @@ pub struct EvaluatedSet<C: CurveAffine> {
 
 #[derive(Debug)]
 pub struct CommonEvaluated<C: CurveAffine> {
-    permutation_evals: Vec<C::Scalar>,
+    pub permutation_evals: Vec<C::Scalar>,
 }
 
+#[derive(Debug)]
 pub struct Evaluated<C: CurveAffine> {
     sets: Vec<EvaluatedSet<C>>,
 }
@@ -71,7 +73,7 @@ impl<C: CurveAffine> VerifyingKey<C> {
 }
 
 impl<C: CurveAffine> Committed<C> {
-    pub(crate) fn evaluate<E: EncodedChallenge<C>, T: TranscriptRead<C, E>>(
+    pub fn evaluate<E: EncodedChallenge<C>, T: TranscriptRead<C, E>>(
         self,
         transcript: &mut T,
     ) -> Result<Evaluated<C>, Error> {
