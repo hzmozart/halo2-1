@@ -119,6 +119,7 @@ impl<C: CurveAffine> Evaluated<C> {
                 expressions
                     .iter()
                     .map(|expression| {
+                        println!("expression: {:?}", expression);
                         expression.evaluate(
                             &|scalar| scalar,
                             &|_| panic!("virtual selectors are removed during optimization"),
