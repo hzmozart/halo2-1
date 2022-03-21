@@ -75,7 +75,7 @@ impl Argument {
 /// The verifying key for a single permutation argument.
 #[derive(Debug)]
 pub struct VerifyingKey<C: CurveAffine> {
-    commitments: Vec<C>,
+    pub commitments: Vec<C>,
 }
 
 impl<C: CurveAffine> VerifyingKey<C> {

@@ -21,7 +21,7 @@ pub trait ColumnType:
 /// A column with an index and type
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
 pub struct Column<C: ColumnType> {
-    index: usize,
+    pub index: usize,
     column_type: C,
 }
 
@@ -756,10 +756,10 @@ impl<F: Field> From<Expression<F>> for Vec<Constraint<F>> {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Gate<F: Field> {
+pub struct Gate<F: Field> {
     name: &'static str,
     constraint_names: Vec<&'static str>,
-    polys: Vec<Expression<F>>,
+    pub polys: Vec<Expression<F>>,
     /// We track queried selectors separately from other cells, so that we can use them to
     /// trigger debug checks on gates.
     queried_selectors: Vec<Selector>,
@@ -797,8 +797,8 @@ pub struct ConstraintSystem<F: Field> {
     pub(crate) num_instance_columns: usize,
     pub(crate) num_selectors: usize,
     pub(crate) selector_map: Vec<Column<Fixed>>,
-    pub(crate) gates: Vec<Gate<F>>,
-    pub(crate) advice_queries: Vec<(Column<Advice>, Rotation)>,
+    pub gates: Vec<Gate<F>>,
+    pub advice_queries: Vec<(Column<Advice>, Rotation)>,
     // Contains an integer for each advice column
     // identifying how many distinct queries it has
     // so far; should be same length as num_advice_columns.
