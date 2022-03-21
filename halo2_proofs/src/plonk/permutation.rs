@@ -13,7 +13,7 @@ use std::io;
 
 /// A permutation argument.
 #[derive(Debug, Clone)]
-pub(crate) struct Argument {
+pub struct Argument {
     /// A sequence of columns involved in the argument.
     columns: Vec<Column<Any>>,
 }

@@ -803,15 +803,15 @@ pub struct ConstraintSystem<F: Field> {
     // identifying how many distinct queries it has
     // so far; should be same length as num_advice_columns.
     num_advice_queries: Vec<usize>,
-    pub(crate) instance_queries: Vec<(Column<Instance>, Rotation)>,
-    pub(crate) fixed_queries: Vec<(Column<Fixed>, Rotation)>,
+    pub instance_queries: Vec<(Column<Instance>, Rotation)>,
+    pub fixed_queries: Vec<(Column<Fixed>, Rotation)>,
 
     // Permutation argument for performing equality constraints
-    pub(crate) permutation: permutation::Argument,
+    pub permutation: permutation::Argument,
 
     // Vector of lookup arguments, where each corresponds to a sequence of
     // input expressions and a sequence of table expressions involved in the lookup.
-    pub(crate) lookups: Vec<lookup::Argument<F>>,
+    pub lookups: Vec<lookup::Argument<F>>,
 
     // Vector of fixed columns, which can be used to store constant values
     // that are copied into advice columns.
