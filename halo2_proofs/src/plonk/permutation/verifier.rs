@@ -10,6 +10,7 @@ use crate::{
     transcript::{EncodedChallenge, TranscriptRead},
 };
 
+#[derive(Debug)]
 pub struct Committed<C: CurveAffine> {
     permutation_product_commitments: Vec<C>,
 }
@@ -21,6 +22,7 @@ pub struct EvaluatedSet<C: CurveAffine> {
     permutation_product_last_eval: Option<C::Scalar>,
 }
 
+#[derive(Debug)]
 pub struct CommonEvaluated<C: CurveAffine> {
     permutation_evals: Vec<C::Scalar>,
 }

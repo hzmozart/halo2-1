@@ -12,6 +12,7 @@ use crate::{
 };
 use ff::Field;
 
+#[derive(Debug)]
 pub struct PermutationCommitments<C: CurveAffine> {
     permuted_input_commitment: C,
     permuted_table_commitment: C,

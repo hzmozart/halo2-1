@@ -51,8 +51,8 @@ mod tests {
 }
 
 impl<C: CurveAffine> Params<C> {
-    pub fn unsafe_setup<E: Engine, R: RngCore>(k: u32) -> Params<E::G1Affine> {
-        Params::<C>::unsafe_setup_rng::<E, R>(k, OsRng)
+    pub fn unsafe_setup<E: Engine>(k: u32) -> Params<E::G1Affine> {
+        Params::<C>::unsafe_setup_rng::<E, _>(k, OsRng)
     }
     /// Initializes parameters for the curve, Draws random toxic point inside of the function
     /// MUST NOT be used in production
@@ -63,7 +63,7 @@ impl<C: CurveAffine> Params<C> {
         assert!(k <= E::Scalar::S);
         let n: u64 = 1 << k;
 
-        let s = E::Scalar::random(rng);
+        let s = E::Scalar::random(&mut rng);
 
         let mut g_projective: Vec<E::G1> = Vec::with_capacity(n as usize);
         let g1 = <E::G1Affine as PrimeCurveAffine>::generator();
