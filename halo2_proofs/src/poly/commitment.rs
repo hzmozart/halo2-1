@@ -11,6 +11,7 @@ use crate::helpers::CurveRead;
 
 use ff::{Field, PrimeField};
 use group::{prime::PrimeCurveAffine, Curve, Group as _, GroupEncoding};
+use rand::RngCore;
 use rand_core::OsRng;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Mul, MulAssign};
@@ -50,16 +51,19 @@ mod tests {
 }
 
 impl<C: CurveAffine> Params<C> {
+    pub fn unsafe_setup<E: Engine, R: RngCore>(k: u32) -> Params<E::G1Affine> {
+        Params::<C>::unsafe_setup_rng::<E, R>(k, OsRng)
+    }
     /// Initializes parameters for the curve, Draws random toxic point inside of the function
     /// MUST NOT be used in production
-    pub fn unsafe_setup<E: Engine>(k: u32) -> Params<E::G1Affine> {
+    pub fn unsafe_setup_rng<E: Engine, R: RngCore>(k: u32, mut rng: R) -> Params<E::G1Affine> {
         // TODO: Make this function only available in test mod
         // Largest root of unity exponent of the Engine is `2^E::Scalar::S`, so we can
         // only support FFTs of polynomials below degree `2^E::Scalar::S`.
         assert!(k <= E::Scalar::S);
         let n: u64 = 1 << k;
 
-        let s = E::Scalar::random(OsRng);
+        let s = E::Scalar::random(rng);
 
         let mut g_projective: Vec<E::G1> = Vec::with_capacity(n as usize);
         let g1 = <E::G1Affine as PrimeCurveAffine>::generator();

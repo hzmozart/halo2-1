@@ -32,7 +32,7 @@ pub struct Evaluated<C: CurveAffine> {
 }
 
 impl<F: FieldExt> Argument<F> {
-    pub(in crate::plonk) fn read_permuted_commitments<
+    pub fn read_permuted_commitments<
         C: CurveAffine,
         E: EncodedChallenge<C>,
         T: TranscriptRead<C, E>,
