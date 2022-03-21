@@ -26,12 +26,12 @@ pub struct Committed<C: CurveAffine> {
 
 #[derive(Debug)]
 pub struct Evaluated<C: CurveAffine> {
-    committed: Committed<C>,
-    product_eval: C::Scalar,
-    product_next_eval: C::Scalar,
-    permuted_input_eval: C::Scalar,
-    permuted_input_inv_eval: C::Scalar,
-    permuted_table_eval: C::Scalar,
+    pub committed: Committed<C>,
+    pub product_eval: C::Scalar,
+    pub product_next_eval: C::Scalar,
+    pub permuted_input_eval: C::Scalar,
+    pub permuted_input_inv_eval: C::Scalar,
+    pub permuted_table_eval: C::Scalar,
 }
 
 impl<F: FieldExt> Argument<F> {
