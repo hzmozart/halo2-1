@@ -39,10 +39,10 @@ use std::io;
 /// particular circuit.
 #[derive(Debug)]
 pub struct VerifyingKey<C: CurveAffine> {
-    domain: EvaluationDomain<C::Scalar>,
-    fixed_commitments: Vec<C>,
-    permutation: permutation::VerifyingKey<C>,
-    cs: ConstraintSystem<C::Scalar>,
+    pub domain: EvaluationDomain<C::Scalar>,
+    pub fixed_commitments: Vec<C>,
+    pub permutation: permutation::VerifyingKey<C>,
+    pub cs: ConstraintSystem<C::Scalar>,
 }
 
 impl<C: CurveAffine> VerifyingKey<C> {

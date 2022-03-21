@@ -110,7 +110,10 @@ impl<'a, C: MultiMillerLoop, R: RngCore> VerificationStrategy<C::G1Affine>
     }
 }
 
-/// Returns a boolean indicating whether or not the proof is valid
+fn empty_sanity_check<C: MultiMillerLoop>(v: Vec<VerifierQuery<C::G1Affine>>) {
+
+}
+
 pub fn verify_proof<
     'params,
     C: MultiMillerLoop,
@@ -124,6 +127,26 @@ pub fn verify_proof<
     instances: &[&[&[C::Scalar]]],
     transcript: &mut T,
 ) -> Result<V::Output, Error> {
+    verify_proof_check(params, vk, strategy, instances, transcript, empty_sanity_check::<C>)
+}
+
+/// Returns a boolean indicating whether or not the proof is valid
+pub fn verify_proof_check<
+    'params,
+    C: MultiMillerLoop,
+    E: EncodedChallenge<C::G1Affine>,
+    T: TranscriptRead<C::G1Affine, E>,
+    V: VerificationStrategy<C::G1Affine>,
+    A
+>(
+    params: &'params ParamsVerifier<C>,
+    vk: &VerifyingKey<C::G1Affine>,
+    strategy: V,
+    instances: &[&[&[C::Scalar]]],
+    transcript: &mut T,
+    sanity_chk_fn: A,
+) -> Result<V::Output, Error>
+  where A: Fn(Vec<VerifierQuery<C::G1Affine>>) -> () {
     // Check that instances matches the expected number of instance columns
     for instances in instances.iter() {
         if instances.len() != vk.cs.num_instance_columns {
@@ -382,6 +405,8 @@ pub fn verify_proof<
         )
         .chain(permutations_common.queries(&vk.permutation, x))
         .chain(vanishing.queries(x));
+
+    sanity_chk_fn(queries.clone().collect::<Vec<_>>());
 
     // We are now convinced the circuit is satisfied so long as the
     // polynomial commitments open to the correct values.
