@@ -128,7 +128,7 @@ impl<E, F: Field, B: Basis> Evaluator<E, F, B> {
     }
 
     /// Evaluates the given polynomial operation against this context.
-    pub(crate) fn evaluate(
+    pub fn evaluate(
         &self,
         ast: &Ast<E, F, B>,
         domain: &EvaluationDomain<F>,
