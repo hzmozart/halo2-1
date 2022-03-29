@@ -33,10 +33,10 @@ pub struct Params<C: CurveAffine> {
 pub struct ParamsVerifier<E: Engine> {
     pub k: u32,
     pub n: u64,
-    pub(crate) g1: E::G1Affine,
-    pub(crate) g2: E::G2Affine,
-    pub(crate) s_g2: E::G2Affine,
-    pub(crate) g_lagrange: Vec<E::G1Affine>,
+    pub g1: E::G1Affine,
+    pub g2: E::G2Affine,
+    pub s_g2: E::G2Affine,
+    pub g_lagrange: Vec<E::G1Affine>,
 }
 
 #[cfg(test)]
