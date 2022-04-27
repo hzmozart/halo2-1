@@ -407,6 +407,7 @@ pub fn verify_proof_check<
         .chain(vanishing.queries(x));
 
     sanity_chk_fn(queries.clone().collect::<Vec<_>>());
+    println!("advice_evals.len(): {}", advice_evals.len());
 
     // We are now convinced the circuit is satisfied so long as the
     // polynomial commitments open to the correct values.
