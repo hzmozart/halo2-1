@@ -15,8 +15,8 @@ use rand::RngCore;
 use rand_core::OsRng;
 use std::marker::PhantomData;
 use std::ops::{Add, AddAssign, Mul, MulAssign};
-
 use std::io;
+use rayon::prelude::*;
 
 /// These are the prover parameters for the polynomial commitment scheme.
 #[derive(Debug)]
@@ -177,12 +177,22 @@ impl<C: CurveAffine> Params<C> {
         let k = u32::from_le_bytes(k);
         let n = 1 << k;
 
+
+        let mut g_buf: Vec<u8> = vec![];
+        g_buf.resize(32 * n, 0u8);
+        reader.read_exact(&mut g_buf)?;
         let g: Vec<C> = (0..n)
-            .map(|_| C::read(&mut reader))
-            .collect::<Result<_, _>>()?;
+            .into_par_iter()
+            .map(|i| C::read(&mut &g_buf[i * 32..i * 32 + 32]).unwrap())
+            .collect();
+
+        let mut g_lagrange_buf: Vec<u8> = vec![];
+        g_lagrange_buf.resize(32 * n, 0u8);
+        reader.read_exact(&mut g_lagrange_buf)?;
         let g_lagrange: Vec<C> = (0..n)
-            .map(|_| C::read(&mut reader))
-            .collect::<Result<_, _>>()?;
+            .into_par_iter()
+            .map(|i| C::read(&mut &g_lagrange_buf[i * 32..i * 32 + 32]).unwrap())
+            .collect();
 
         let mut additional_data_len = [0u8; 4];
         reader.read_exact(&mut additional_data_len[..])?;
@@ -193,7 +203,7 @@ impl<C: CurveAffine> Params<C> {
 
         Ok(Params {
             k,
-            n,
+            n: n as u64,
             g,
             g_lagrange,
             additional_data,
