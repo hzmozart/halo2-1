@@ -1,6 +1,7 @@
 use ff::Field;
 use group::Curve;
 use rand_core::RngCore;
+use std::cmp;
 use std::env::var;
 use std::ops::RangeTo;
 use std::sync::atomic::AtomicUsize;
@@ -33,6 +34,11 @@ use crate::{
     transcript::{EncodedChallenge, TranscriptWrite},
 };
 
+#[derive(Debug)]
+pub struct ProofAux<C: CurveAffine> {
+    pub division_return: Vec<C::Scalar>,
+}
+
 /// This creates a proof for the provided `circuit` when given the public
 /// parameters `params` and the proving key [`ProvingKey`] that was
 /// generated previously for the same circuit. The provided `instances`
@@ -50,7 +56,7 @@ pub fn create_proof<
     instances: &[&[&[C::Scalar]]],
     mut rng: R,
     transcript: &mut T,
-) -> Result<(), Error> {
+) -> Result<ProofAux<C>, Error> {
     for instance in instances.iter() {
         if instance.len() != pk.vk.cs.num_instance_columns {
             return Err(Error::InvalidInstances);
@@ -543,5 +549,40 @@ pub fn create_proof<
         // We query the h(X) polynomial at x
         .chain(vanishing.open(x));
 
-    multiopen::create_proof(params, transcript, instances).map_err(|_| Error::Opening)
+    let division_return = {
+        let mut buf = vec![];
+        let one = C::ScalarExt::one();
+        let mut ws = vec![C::ScalarExt::one()];
+        let l = pk.get_vk().cs.blinding_factors() as u32 + 1;
+        let n = params.n as u32;
+        let omega = pk.get_vk().domain.get_omega();
+        for i in 1..=l {
+            let wi = ws[(i - 1) as usize] * omega;
+            ws.push(wi);
+        }
+
+        let _ = (0..=l as usize)
+            .map(|i| {
+                let wi = &ws[i];
+                let tmp = one * wi.invert().unwrap();
+                let left = tmp * (xn - one);
+                let right = C::ScalarExt::from(n as u64) * (*x - tmp);
+                let tmp2 = left * right.invert().unwrap();
+
+                //if wi.cmp(&one) != cmp::Ordering::Equal {
+                //    println!("{:?}", tmp);
+                //}
+                if right != one {
+                    buf.push(tmp2);
+                }
+                tmp
+            })
+            .collect::<Vec<_>>();
+
+        buf
+    };
+
+    multiopen::create_proof(params, transcript, instances)
+        .map_err(|_| Error::Opening)
+        .map(|_| ProofAux { division_return })
 }
