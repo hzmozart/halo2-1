@@ -8,4 +8,9 @@ fn main() {
             .add_multiexp::<G1Affine, Fq>();
         ec_gpu_gen::generate(&source_builder);
     }
+
+    let mut nvcc = cc::Build::new();
+
+    nvcc.cuda(true);
+    nvcc.file("cuda/hello.cu").compile("hello");
 }

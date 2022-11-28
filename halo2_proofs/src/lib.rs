@@ -29,6 +29,7 @@ mod multicore;
 pub mod plonk;
 pub mod poly;
 pub mod transcript;
+pub mod cuda;
 
 pub mod dev;
 mod helpers;
