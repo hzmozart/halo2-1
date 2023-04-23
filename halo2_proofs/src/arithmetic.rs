@@ -165,7 +165,11 @@ pub fn gpu_multiexp_multikernel<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C
 #[cfg(feature = "cuda")]
 pub fn gpu_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
     use ec_gpu_gen::{
-        fft::FftKernel, multiexp::SingleMultiexpKernel, rust_gpu_tools::Device, threadpool::Worker,
+        fft::FftKernel,
+        multiexp::SingleMultiexpKernel,
+        rust_gpu_tools::{program_closures, Device},
+        threadpool::Worker,
+        EcResult,
     };
     use group::Curve;
     use pairing::bn256::Fr;
@@ -175,13 +179,55 @@ pub fn gpu_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Cur
     let kern = SingleMultiexpKernel::<G1Affine>::create(programs, device, None)
         .expect("Cannot initialize kernel!");
 
-    let _coeffs = coeffs.iter().map(|x| x.to_repr()).collect::<Vec<_>>();
-    let _coeffs: &[[u8; 32]] = unsafe { std::mem::transmute(&_coeffs[..]) };
+    let _coeffs: &[[u8; 32]] = gpu_batch_unmont::<C>(coeffs);
     let bases: &[G1Affine] = unsafe { std::mem::transmute(bases) };
 
     let a = [kern.multiexp(bases, _coeffs).unwrap()];
     let res: &[C::Curve] = unsafe { std::mem::transmute(&a[..]) };
     res[0]
+}
+
+pub fn gpu_batch_unmont<C:CurveAffine>(input: &[C::Scalar]) -> &[[u8; 32]] {
+    use ec_gpu_gen::{
+        rust_gpu_tools::{program_closures, Device},
+        EcResult,
+    };
+
+    let device = Device::all()[0];
+    let programs = ec_gpu_gen::program!(device).unwrap();
+
+    let closures = program_closures!(|program, input: &[C::Scalar]| -> EcResult<Vec<_>> {
+        let local_work_size = 128;
+        let mut global_work_size = input.len() / local_work_size;
+
+        let remainder: usize = input.len() % local_work_size;
+        let buffer = match remainder {
+            0 => {
+                program.create_buffer_from_slice(input)
+            },
+            _ => {
+                global_work_size += 1;
+                let x = vec![C::Scalar::default(); remainder];
+                let _input = [&input[..], &x[..]].concat();
+                program.create_buffer_from_slice(_input.as_slice())
+            }
+        }?;
+
+        let kernel_name = format!("{}_batch_unmont", "Bn256_Fr");
+        let kernel = program.create_kernel(
+            &kernel_name,
+            global_work_size as usize,
+            local_work_size as usize,
+        )?;
+        kernel.arg(&buffer).run()?;
+        let mut result = vec![C::Scalar::default(); input.len() + remainder];
+
+        program.read_into_buffer(&buffer, &mut result)?;
+        Ok(result[..input.len()].to_vec())
+    });
+
+    let result = programs.run(closures, &input).unwrap();
+    unsafe { std::mem::transmute(&result[..]) }
 }
 
 pub fn best_multiexp_gpu_cond<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {

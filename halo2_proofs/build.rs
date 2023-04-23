@@ -3,9 +3,11 @@ fn main() {
     {
         use ec_gpu_gen::SourceBuilder;
         use pairing::bn256::{Fq, Fr, G1Affine};
+        use group::prime::PrimeCurveAffine;
         let source_builder = SourceBuilder::new()
             .add_fft::<Fr>()
-            .add_multiexp::<G1Affine, Fq>();
+            .add_multiexp::<G1Affine, Fq>()
+            .add_field::<<G1Affine as PrimeCurveAffine>::Scalar>();
         ec_gpu_gen::generate(&source_builder);
     }
 }
