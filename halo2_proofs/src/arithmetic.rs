@@ -190,29 +190,17 @@ pub fn gpu_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Cur
 pub fn gpu_batch_unmont<C:CurveAffine>(input: &[C::Scalar]) -> &[[u8; 32]] {
     use ec_gpu_gen::{
         rust_gpu_tools::{program_closures, Device},
-        EcResult,
+        EcResult, 
     };
 
     let device = Device::all()[0];
     let programs = ec_gpu_gen::program!(device).unwrap();
 
     let closures = program_closures!(|program, input: &[C::Scalar]| -> EcResult<Vec<_>> {
-        let local_work_size = 128;
-        let mut global_work_size = input.len() / local_work_size;
+        let local_work_size = 1;
+        let global_work_size = input.len();
 
-        let remainder: usize = input.len() % local_work_size;
-        let buffer = match remainder {
-            0 => {
-                program.create_buffer_from_slice(input)
-            },
-            _ => {
-                global_work_size += 1;
-                let x = vec![C::Scalar::default(); remainder];
-                let _input = [&input[..], &x[..]].concat();
-                program.create_buffer_from_slice(_input.as_slice())
-            }
-        }?;
-
+        let buffer= program.create_buffer_from_slice(input)?;
         let kernel_name = format!("{}_batch_unmont", "Bn256_Fr");
         let kernel = program.create_kernel(
             &kernel_name,
@@ -220,10 +208,10 @@ pub fn gpu_batch_unmont<C:CurveAffine>(input: &[C::Scalar]) -> &[[u8; 32]] {
             local_work_size as usize,
         )?;
         kernel.arg(&buffer).run()?;
-        let mut result = vec![C::Scalar::default(); input.len() + remainder];
+        let mut result = vec![C::Scalar::default(); input.len()];
 
         program.read_into_buffer(&buffer, &mut result)?;
-        Ok(result[..input.len()].to_vec())
+        Ok(result)
     });
 
     let result = programs.run(closures, &input).unwrap();
