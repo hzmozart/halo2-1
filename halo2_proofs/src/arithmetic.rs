@@ -176,25 +176,6 @@ pub fn gpu_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Cur
 
     let device = Device::all()[0];
     let programs = ec_gpu_gen::program!(device).unwrap();
-    let kern = SingleMultiexpKernel::<G1Affine>::create(programs, device, None)
-        .expect("Cannot initialize kernel!");
-
-    let _coeffs: &[[u8; 32]] = gpu_batch_unmont::<C>(coeffs);
-    let bases: &[G1Affine] = unsafe { std::mem::transmute(bases) };
-
-    let a = [kern.multiexp(bases, _coeffs).unwrap()];
-    let res: &[C::Curve] = unsafe { std::mem::transmute(&a[..]) };
-    res[0]
-}
-
-pub fn gpu_batch_unmont<C:CurveAffine>(input: &[C::Scalar]) -> &[[u8; 32]] {
-    use ec_gpu_gen::{
-        rust_gpu_tools::{program_closures, Device},
-        EcResult, 
-    };
-
-    let device = Device::all()[0];
-    let programs = ec_gpu_gen::program!(device).unwrap();
 
     let closures = program_closures!(|program, input: &[C::Scalar]| -> EcResult<Vec<_>> {
         let local_work_size = 1;
@@ -214,8 +195,16 @@ pub fn gpu_batch_unmont<C:CurveAffine>(input: &[C::Scalar]) -> &[[u8; 32]] {
         Ok(result)
     });
 
-    let result = programs.run(closures, &input).unwrap();
-    unsafe { std::mem::transmute(&result[..]) }
+    let _coeffs = programs.run(closures, &coeffs).unwrap();
+    let _coeffs: &[[u8; 32]] = unsafe { std::mem::transmute(&_coeffs[..]) };
+
+    let bases: &[G1Affine] = unsafe { std::mem::transmute(bases) };
+
+    let kern = SingleMultiexpKernel::<G1Affine>::create(programs, device, None)
+        .expect("Cannot initialize kernel!");
+    let a = [kern.multiexp(bases, _coeffs).unwrap()];
+    let res: &[C::Curve] = unsafe { std::mem::transmute(&a[..]) };
+    res[0]
 }
 
 pub fn best_multiexp_gpu_cond<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Curve {
