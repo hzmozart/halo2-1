@@ -149,10 +149,8 @@ pub fn gpu_multiexp_multikernel<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C
         MultiexpKernel::<G1Affine>::create(programs, &devices).expect("Cannot initialize kernel!");
     let pool = Worker::new();
 
-    let _coeffs = [Arc::new(
-        coeffs.iter().map(|x| x.to_repr()).collect::<Vec<_>>(),
-    )];
-    let _coeffs: &Arc<Vec<[u8; 32]>> = unsafe { std::mem::transmute(&_coeffs) };
+    let _coeffs = [Arc::new(vec![coeffs])];
+    let _coeffs: &Arc<Vec<Fr>> = unsafe { std::mem::transmute(&_coeffs) };
     let bases: &[G1Affine] = unsafe { std::mem::transmute(bases) };
     let bases = Arc::new(Vec::from(bases));
 
@@ -177,27 +175,7 @@ pub fn gpu_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Cur
     let device = Device::all()[0];
     let programs = ec_gpu_gen::program!(device).unwrap();
 
-    let closures = program_closures!(|program, input: &[C::Scalar]| -> EcResult<Vec<_>> {
-        let local_work_size = 1;
-        let global_work_size = input.len();
-
-        let buffer= program.create_buffer_from_slice(input)?;
-        let kernel_name = format!("{}_batch_unmont", "Bn256_Fr");
-        let kernel = program.create_kernel(
-            &kernel_name,
-            global_work_size as usize,
-            local_work_size as usize,
-        )?;
-        kernel.arg(&buffer).run()?;
-        let mut result = vec![C::Scalar::default(); input.len()];
-
-        program.read_into_buffer(&buffer, &mut result)?;
-        Ok(result)
-    });
-
-    let _coeffs = programs.run(closures, &coeffs).unwrap();
-    let _coeffs: &[[u8; 32]] = unsafe { std::mem::transmute(&_coeffs[..]) };
-
+    let _coeffs: &[Fr] = unsafe { std::mem::transmute(&coeffs[..]) };
     let bases: &[G1Affine] = unsafe { std::mem::transmute(bases) };
 
     let kern = SingleMultiexpKernel::<G1Affine>::create(programs, device, None)
