@@ -646,10 +646,10 @@ impl<F: Field + Group> Assignment<F> for MockProver<F> {
         }
 
         println!(
-            "assign permutation between column {} row {} and column {} row {}",
-            left_column.index(),
+            "assign permutation between column {:?} row {} and column {:?} row {}",
+            left_column,
             left_row,
-            right_column.index(),
+            right_column,
             right_row,
         );
 
