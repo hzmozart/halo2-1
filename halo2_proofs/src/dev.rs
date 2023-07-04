@@ -616,11 +616,20 @@ impl<F: Field + Group> Assignment<F> for MockProver<F> {
             region.track_cell(column.into(), row);
         }
 
+        let v = to()?.into().evaluate();
+
+        println!(
+            "assign fixed at column {} row {} with value {:?}",
+            column.index(),
+            row,
+            v
+        );
+
         *self
             .fixed
             .get_mut(column.index())
             .and_then(|v| v.get_mut(row))
-            .ok_or(Error::BoundsFailure)? = CellValue::Assigned(to()?.into().evaluate());
+            .ok_or(Error::BoundsFailure)? = CellValue::Assigned(v);
 
         Ok(())
     }
@@ -635,6 +644,14 @@ impl<F: Field + Group> Assignment<F> for MockProver<F> {
         if !self.usable_rows.contains(&left_row) || !self.usable_rows.contains(&right_row) {
             return Err(Error::not_enough_rows_available(self.k));
         }
+
+        println!(
+            "assign permutation between column {} row {} and column {} row {}",
+            left_column.index(),
+            left_row,
+            right_column.index(),
+            right_row,
+        );
 
         self.permutation
             .copy(left_column, left_row, right_column, right_row)
