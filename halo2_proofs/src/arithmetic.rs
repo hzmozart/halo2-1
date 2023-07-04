@@ -149,10 +149,8 @@ pub fn gpu_multiexp_multikernel<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C
         MultiexpKernel::<G1Affine>::create(programs, &devices).expect("Cannot initialize kernel!");
     let pool = Worker::new();
 
-    let _coeffs = [Arc::new(
-        coeffs.iter().map(|x| x.to_repr()).collect::<Vec<_>>(),
-    )];
-    let _coeffs: &Arc<Vec<[u8; 32]>> = unsafe { std::mem::transmute(&_coeffs) };
+    let _coeffs = [Arc::new(vec![coeffs])];
+    let _coeffs: &Arc<Vec<Fr>> = unsafe { std::mem::transmute(&_coeffs) };
     let bases: &[G1Affine] = unsafe { std::mem::transmute(bases) };
     let bases = Arc::new(Vec::from(bases));
 
@@ -175,8 +173,7 @@ pub fn gpu_multiexp<C: CurveAffine>(coeffs: &[C::Scalar], bases: &[C]) -> C::Cur
     let kern = SingleMultiexpKernel::<G1Affine>::create(programs, device, None)
         .expect("Cannot initialize kernel!");
 
-    let _coeffs = coeffs.iter().map(|x| x.to_repr()).collect::<Vec<_>>();
-    let _coeffs: &[[u8; 32]] = unsafe { std::mem::transmute(&_coeffs[..]) };
+    let _coeffs: &[Fr] = unsafe { std::mem::transmute(&coeffs[..]) };
     let bases: &[G1Affine] = unsafe { std::mem::transmute(bases) };
 
     let a = [kern.multiexp(bases, _coeffs).unwrap()];
