@@ -79,6 +79,7 @@ sanity-checks = []
 shplonk = []
 gwc = []
 cuda = ["ec-gpu-gen/cuda", "pairing/gpu"]
+asm = ["pairing/asm"]
 
 [lib]
 bench = false
