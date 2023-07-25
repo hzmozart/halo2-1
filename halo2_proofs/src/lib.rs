@@ -31,4 +31,4 @@ pub mod poly;
 pub mod transcript;
 
 pub mod dev;
-mod helpers;
+pub mod helpers;
