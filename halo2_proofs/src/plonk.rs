@@ -16,7 +16,7 @@ use crate::poly::{
 use crate::transcript::{ChallengeScalar, EncodedChallenge, Transcript};
 
 mod assigned;
-mod circuit;
+pub(crate) mod circuit;
 mod error;
 mod evaluation;
 mod keygen;
