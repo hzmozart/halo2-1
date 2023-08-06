@@ -13,12 +13,12 @@ use crate::{
     },
 };
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct Assembly {
-    columns: Vec<Column<Any>>,
+    pub(crate) columns: Vec<Column<Any>>,
     pub(crate) mapping: Vec<Vec<(usize, usize)>>,
-    aux: Vec<Vec<(usize, usize)>>,
-    sizes: Vec<Vec<usize>>,
+    pub(crate) aux: Vec<Vec<(usize, usize)>>,
+    pub(crate) sizes: Vec<Vec<usize>>,
 }
 
 impl Assembly {

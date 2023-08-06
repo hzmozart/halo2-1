@@ -696,15 +696,13 @@ pub fn create_witness<
 >(
     params: &Params<C>,
     pk: &ProvingKey<C>,
-    circuits: &[ConcreteCircuit],
-    instances: &[&[&[C::Scalar]]],
+    circuit: &ConcreteCircuit,
+    instances: &[&[C::Scalar]],
     writer: &mut W,
 ) -> Result<(), Error> {
     let meta = &pk.vk.cs;
-    for (circuit, instances) in circuits.iter().zip(instances.iter()) {
-            let unusable_rows_start = params.n as usize - (meta.blinding_factors() + 1);
-            AssignWitnessCollection::store_witness(params, pk, instances, unusable_rows_start, circuit, writer)?;
-    };
+    let unusable_rows_start = params.n as usize - (meta.blinding_factors() + 1);
+    AssignWitnessCollection::store_witness(params, pk, instances, unusable_rows_start, circuit, writer)?;
     Ok(())
 }
 

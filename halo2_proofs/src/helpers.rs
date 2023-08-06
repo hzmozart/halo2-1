@@ -1,17 +1,18 @@
 use std::{io, ops::RangeTo};
 use ff::Field;
-use pairing::arithmetic::{CurveAffine, FieldExt};
+use crate::{arithmetic::{CurveAffine, FieldExt}, plonk::{generate_pk_info, keygen_pk_from_info}};
 use num_derive::FromPrimitive;
 use num;
 use crate::{
     plonk::{
-        VerifyingKey, permutation, Column, Any, self, ColumnType, VirtualCell, Fixed, ConstraintSystem, Advice, Instance, Expression, Gate, Assigned, Assignment, Selector, Error, Circuit, ProvingKey
+        VerifyingKey, permutation::{self, keygen::Assembly}, Column, Any, self, ColumnType, VirtualCell, Fixed, ConstraintSystem, Advice, Instance, Expression, Gate, Assigned, Assignment, Selector, Error, Circuit, ProvingKey
     },
     poly::{
         EvaluationDomain, Rotation, Polynomial, LagrangeCoeff, commitment::Params
     }, transcript::EncodedChallenge
 };
 use crate::plonk::circuit::FloorPlanner;
+use std::marker::PhantomData;
 
 pub(crate) trait CurveRead: CurveAffine {
     /// Reads a compressed element from the buffer and attempts to parse it
@@ -26,66 +27,132 @@ pub(crate) trait CurveRead: CurveAffine {
 
 impl<C: CurveAffine> CurveRead for C {}
 
-pub fn write_vkey<C: CurveAffine, W: io::Write>(
-    vkey: &VerifyingKey<C>,
-    writer: &mut W,
-) -> io::Result<()> {
-    let j = (vkey.domain.get_quotient_poly_degree() + 1) as u32; // quotient_poly_degree is j-1
-    let k = vkey.domain.k() as u32;
-    writer.write(&mut j.to_le_bytes())?;
-    writer.write(&mut k.to_le_bytes())?;
-    write_cs::<C, W>(&vkey.cs, writer)?;
-
-    //println!("write cs {:?}", &vkey.cs);
-    vkey.write(writer)?;
-    Ok(())
+pub trait Serializable: Clone {
+    /// Reads a compressed element from the buffer and attempts to parse it
+    /// using `from_bytes`.
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self>;
+    /// Reads a compressed element from the buffer and attempts to parse it
+    /// using `from_bytes`.
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()>;
 }
 
-pub fn read_vkey<C: CurveAffine, R: io::Read>(
-    reader: &mut R,
-) -> io::Result<VerifyingKey<C>> {
-    let j = read_u32(reader)?;
-    let k = read_u32(reader)?;
-    let domain: EvaluationDomain<C::Scalar> = EvaluationDomain::new(j, k);
-    let cs = read_cs::<C, R>(reader)?;
-
-    println!("read cs {:?}", cs);
-    let fixed_commitments: Vec<_> = (0..cs.num_fixed_columns)
-        .map(|_| C::read(reader))
-        .collect::<Result<_, _>>()?;
-
-    let permutation = permutation::VerifyingKey::read(reader, &cs.permutation)?;
-
-    Ok(VerifyingKey {
-        domain,
-        cs,
-        fixed_commitments,
-        permutation,
-    })
+fn read_u32<R: io::Read>(reader: &mut R) -> io::Result<u32> {
+    let mut r = [0u8; 4];
+    reader.read(&mut r)?;
+    Ok(u32::from_le_bytes(r))
 }
 
-fn write_argument<W: std::io::Write>(column: &Column<Any>, writer: &mut W) -> std::io::Result<()> {
-    writer.write(&mut (column.index as u32).to_le_bytes())?;
-    writer.write(&mut (*column.column_type() as u32).to_le_bytes())?;
-    Ok(())
+impl Serializable for usize {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        let u = read_u32(reader)?;
+        Ok(u as usize)
+    }
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write(&mut (*self as u32).to_le_bytes())?;
+        Ok(())
+    }
 }
 
-fn read_argument<R: std::io::Read>(reader: &mut R) -> std::io::Result<Column<Any>> {
-    let index = read_u32(reader)?;
-    let typ = read_u32(reader)?;
-    let typ = if typ == Any::Advice as u32 {
-        Any::Advice
-    } else if typ == Any::Instance as u32 {
-        Any::Instance
-    } else if typ == Any::Fixed as u32 {
-        Any::Instance
-    } else {
-        unreachable!()
-    };
-    Ok(Column {
-        index: index as usize,
-        column_type: typ,
-    })
+impl<T: Serializable> Serializable for (T, T) {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        Ok((T::fetch(reader)?, T::fetch(reader)?))
+    }
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        self.0.store(writer)?;
+        self.1.store(writer)?;
+        Ok(())
+    }
+
+}
+
+impl<C: CurveAffine> Serializable for VerifyingKey<C> {
+    fn store<W: io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> io::Result<()> {
+        let j = (self.domain.get_quotient_poly_degree() + 1) as u32; // quotient_poly_degree is j-1
+        let k = self.domain.k() as u32;
+        println!("store vkey j is {}, k is {}", j ,k);
+        writer.write(&mut j.to_le_bytes())?;
+        writer.write(&mut k.to_le_bytes())?;
+        write_cs::<C, W>(&self.cs, writer)?;
+        //println!("write cs {:?}", &vkey.cs);
+        self.write(writer)?;
+        Ok(())
+    }
+
+    fn fetch<R: io::Read>(
+        reader: &mut R,
+    ) -> io::Result<VerifyingKey<C>> {
+        let j = read_u32(reader)?;
+        let k = read_u32(reader)?;
+        println!("j is {}, k is {}", j ,k);
+        let domain: EvaluationDomain<C::Scalar> = EvaluationDomain::new(j, k);
+        let cs = read_cs::<C, R>(reader)?;
+
+        println!("read cs {:?}", cs);
+        let fixed_commitments: Vec<_> = (0..cs.num_fixed_columns)
+            .map(|_| C::read(reader))
+            .collect::<Result<_, _>>()?;
+
+        let permutation = permutation::VerifyingKey::read(reader, &cs.permutation)?;
+
+        Ok(VerifyingKey {
+            domain,
+            cs,
+            fixed_commitments,
+            permutation,
+        })
+    }
+}
+
+impl<T:Serializable> Serializable for Vec<T> {
+    fn store<W: io::Write> (
+        &self,
+        writer: &mut W,
+    ) -> io::Result<()> {
+        writer.write(&mut (self.len() as u32).to_le_bytes())?;
+        for c in self.iter() {
+            c.store(writer)?;
+        }
+        Ok(())
+    }
+    fn fetch<R: io::Read>(
+        reader: &mut R,
+    ) -> io::Result<Vec<T>> {
+        let len = read_u32(reader)?;
+        let mut v = vec![];
+        for _ in 0..len {
+            v.push(T::fetch(reader)?);
+        }
+        Ok(v)
+    }
+}
+
+impl Serializable for Column<Any> {
+    fn store<W: io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
+        writer.write(&mut (self.index as u32).to_le_bytes())?;
+        writer.write(&mut (*self.column_type() as u32).to_le_bytes())?;
+        Ok(())
+    }
+
+    fn fetch<R: io::Read>(reader: &mut R) -> std::io::Result<Self> {
+        let index = read_u32(reader)?;
+        let typ = read_u32(reader)?;
+        let typ = if typ == Any::Advice as u32 {
+            Any::Advice
+        } else if typ == Any::Instance as u32 {
+            Any::Instance
+        } else if typ == Any::Fixed as u32 {
+            Any::Instance
+        } else {
+            unreachable!()
+        };
+        Ok(Column {
+            index: index as usize,
+            column_type: typ,
+        })
+    }
 }
 
 fn write_arguments<W: std::io::Write>(
@@ -94,7 +161,7 @@ fn write_arguments<W: std::io::Write>(
 ) -> std::io::Result<()> {
     writer.write(&mut (columns.len() as u32).to_le_bytes())?;
     for c in columns.iter() {
-        write_argument(c, writer)?;
+        c.store(writer)?
     }
     Ok(())
 }
@@ -105,7 +172,7 @@ fn read_arguments<R: std::io::Read>(
     let len = read_u32(reader)?;
     let mut cols = vec![];
     for _ in 0..len {
-        cols.push(read_argument(reader)?);
+        cols.push(Column::<Any>::fetch(reader)?);
     }
     Ok(plonk::permutation::Argument { columns: cols })
 }
@@ -147,7 +214,7 @@ fn write_virtual_cells <W: std::io::Write>(
 ) -> std::io::Result<()> {
     writer.write(&mut (columns.len() as u32).to_le_bytes())?;
     for cell in columns.iter() {
-        write_argument(&cell.column, writer)?;
+        cell.column.store(writer)?;
         writer.write(&mut (cell.rotation.0 as u32).to_le_bytes())?;
     }
     Ok(())
@@ -174,7 +241,7 @@ fn read_virtual_cells<R: std::io::Read>(
     let mut vcells = vec![];
     let len = read_u32(reader)?;
     for _ in 0..len {
-        let column = read_argument(reader)?;
+        let column = Column::<Any>::fetch(reader)?;
         let rotation = read_u32(reader)?;
         let rotation = Rotation(rotation as i32); //u32 to i32??
         vcells.push(VirtualCell {column, rotation})
@@ -235,17 +302,11 @@ fn write_cs<C: CurveAffine, W: io::Write>(
     write_arguments(&cs.permutation.columns, writer)?;
     writer.write(&(cs.lookups.len() as u32).to_le_bytes())?;
     for p in cs.lookups.iter() {
-        write_expressions::<C, W>(&p.input_expressions, writer)?;
-        write_expressions::<C, W>(&p.table_expressions, writer)?;
+        p.input_expressions.store(writer)?;
+        p.table_expressions.store(writer)?;
     }
     write_gates::<C, W>(&cs.gates, writer)?;
     Ok(())
-}
-
-fn read_u32<R: io::Read>(reader: &mut R) -> io::Result<u32> {
-    let mut r = [0u8; 4];
-    reader.read(&mut r)?;
-    Ok(u32::from_le_bytes(r))
 }
 
 fn read_cs<C: CurveAffine, R: io::Read>(reader: &mut R) -> io::Result<ConstraintSystem<C::Scalar>> {
@@ -271,8 +332,8 @@ fn read_cs<C: CurveAffine, R: io::Read>(reader: &mut R) -> io::Result<Constraint
     let mut lookups = vec![];
     let nb_lookup = read_u32(reader)?;
     for _ in 0..nb_lookup {
-        let input_expressions = read_expressions::<C, R>(reader)?;
-        let table_expressions = read_expressions::<C, R>(reader)?;
+        let input_expressions = Vec::<Expression<C::Scalar>>::fetch(reader)?;
+        let table_expressions = Vec::<Expression<C::Scalar>>::fetch(reader)?;
         lookups.push(plonk::lookup::Argument {
             name: "",
             input_expressions,
@@ -298,35 +359,13 @@ fn read_cs<C: CurveAffine, R: io::Read>(reader: &mut R) -> io::Result<Constraint
     })
 }
 
-fn write_expressions<C: CurveAffine, W: std::io::Write>(
-    expressions: &Vec<Expression<C::Scalar>>,
-    writer: &mut W,
-) -> std::io::Result<()> {
-    writer.write(&mut (expressions.len() as u32).to_le_bytes())?;
-    for e in expressions.iter() {
-        encode_expression(&e, writer)?;
-    }
-    Ok(())
-}
-
-fn read_expressions<C: CurveAffine, R: std::io::Read>(
-    reader: &mut R,
-) -> std::io::Result<Vec<Expression<C::Scalar>>> {
-    let nb_expr = read_u32(reader)?;
-    let mut exps = vec![];
-    for _ in 0..nb_expr {
-        exps.push(decode_expression(reader)?)
-    }
-    Ok(exps)
-}
-
 fn write_gates<C: CurveAffine, W: std::io::Write>(
     gates: &Vec<Gate<C::Scalar>>,
     writer: &mut W,
 ) -> std::io::Result<()> {
     writer.write(&mut (gates.len() as u32).to_le_bytes())?;
     for gate in gates.iter() {
-        write_expressions::<C, W>(&gate.polys, writer)?;
+        gate.polys.store(writer)?;
         write_virtual_cells(&gate.queried_cells, writer)?;
     }
     Ok(())
@@ -338,7 +377,10 @@ fn read_gates<C: CurveAffine, R: std::io::Read>(
     let nb_gates = read_u32(reader)?;
     let mut gates = vec![];
     for _ in 0..nb_gates {
-        gates.push(Gate::new_with_polys_and_queries(read_expressions::<C, R>(reader)?, read_virtual_cells(reader)?));
+        gates.push(Gate::new_with_polys_and_queries(
+            Vec::<Expression<C::Scalar>>::fetch(reader)?,
+            read_virtual_cells(reader)?
+        ));
     }
     Ok(gates)
 }
@@ -381,125 +423,128 @@ fn expression_code<F: FieldExt>(e: &Expression<F>) -> ExpressionCode {
     }
 }
 
-fn decode_expression<F: FieldExt, R: io::Read>(reader: &mut R) -> io::Result<Expression<F>> {
-    let code = read_u32(reader)?;
-    match num::FromPrimitive::from_u32(code).unwrap() {
-        ExpressionCode::Constant => {
-            let scalar = F::read(reader)?;
-            Ok(Expression::Constant(scalar))
+impl<F: FieldExt> Serializable for Expression<F> {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Expression<F>> {
+        let code = read_u32(reader)?;
+        match num::FromPrimitive::from_u32(code).unwrap() {
+            ExpressionCode::Constant => {
+                let scalar = F::read(reader)?;
+                Ok(Expression::Constant(scalar))
+            }
+            ExpressionCode::Fixed => {
+                let query_index = read_u32(reader)? as usize;
+                let column_index = read_u32(reader)? as usize;
+                let rotation = Rotation(read_u32(reader)? as i32);
+                Ok(Expression::Fixed {
+                    query_index,
+                    column_index,
+                    rotation,
+                })
+            }
+            ExpressionCode::Advice => {
+                let query_index = read_u32(reader)? as usize;
+                let column_index = read_u32(reader)? as usize;
+                let rotation = Rotation(read_u32(reader)? as i32);
+                Ok(Expression::Advice {
+                    query_index,
+                    column_index,
+                    rotation,
+                })
+            }
+            ExpressionCode::Instance => {
+                let query_index = read_u32(reader)? as usize;
+                let column_index = read_u32(reader)? as usize;
+                let rotation = Rotation(read_u32(reader)? as i32);
+                Ok(Expression::Instance {
+                    query_index,
+                    column_index,
+                    rotation,
+                })
+            }
+            ExpressionCode::Negated => Ok(Expression::Negated(Box::new(Self::fetch(reader)?))),
+
+            ExpressionCode::Sum => {
+                let a = Self::fetch(reader)?;
+                let b = Self::fetch(reader)?;
+                Ok(Expression::Sum(Box::new(a), Box::new(b)))
+            }
+
+            ExpressionCode::Product => {
+                let a = Self::fetch(reader)?;
+                let b = Self::fetch(reader)?;
+                Ok(Expression::Product(Box::new(a), Box::new(b)))
+            }
+
+            ExpressionCode::Scaled => {
+                let a = Self::fetch(reader)?;
+                let f = F::read(reader)?;
+                Ok(Expression::Scaled(Box::new(a), f))
+            }
         }
-        ExpressionCode::Fixed => {
-            let query_index = read_u32(reader)? as usize;
-            let column_index = read_u32(reader)? as usize;
-            let rotation = Rotation(read_u32(reader)? as i32);
-            Ok(Expression::Fixed {
+    }
+
+    fn store<W: io::Write>(
+        &self,
+        writer: &mut W,
+    ) -> io::Result<()> {
+        writer.write(&mut (expression_code(self) as u32).to_le_bytes())?;
+        match self {
+            Expression::Constant(scalar) => {
+                writer.write(&mut scalar.to_repr().as_ref())?;
+                Ok(())
+            }
+            Expression::Fixed {
                 query_index,
                 column_index,
                 rotation,
-            })
-        }
-        ExpressionCode::Advice => {
-            let query_index = read_u32(reader)? as usize;
-            let column_index = read_u32(reader)? as usize;
-            let rotation = Rotation(read_u32(reader)? as i32);
-            Ok(Expression::Advice {
+            } => {
+                writer.write(&(*query_index as u32).to_le_bytes())?;
+                writer.write(&(*column_index as u32).to_le_bytes())?;
+                writer.write(&(rotation.0 as u32).to_le_bytes())?;
+                Ok(())
+            }
+            Expression::Advice {
                 query_index,
                 column_index,
                 rotation,
-            })
-        }
-        ExpressionCode::Instance => {
-            let query_index = read_u32(reader)? as usize;
-            let column_index = read_u32(reader)? as usize;
-            let rotation = Rotation(read_u32(reader)? as i32);
-            Ok(Expression::Instance {
+            } => {
+                writer.write(&(*query_index as u32).to_le_bytes())?;
+                writer.write(&(*column_index as u32).to_le_bytes())?;
+                writer.write(&(rotation.0 as u32).to_le_bytes())?;
+                Ok(())
+            }
+            Expression::Instance {
                 query_index,
                 column_index,
                 rotation,
-            })
-        }
-        ExpressionCode::Negated => Ok(Expression::Negated(Box::new(decode_expression(reader)?))),
-
-        ExpressionCode::Sum => {
-            let a = decode_expression(reader)?;
-            let b = decode_expression(reader)?;
-            Ok(Expression::Sum(Box::new(a), Box::new(b)))
-        }
-
-        ExpressionCode::Product => {
-            let a = decode_expression(reader)?;
-            let b = decode_expression(reader)?;
-            Ok(Expression::Product(Box::new(a), Box::new(b)))
-        }
-
-        ExpressionCode::Scaled => {
-            let a = decode_expression(reader)?;
-            let f = F::read(reader)?;
-            Ok(Expression::Scaled(Box::new(a), f))
+            } => {
+                writer.write(&(*query_index as u32).to_le_bytes())?;
+                writer.write(&(*column_index as u32).to_le_bytes())?;
+                writer.write(&(rotation.0 as u32).to_le_bytes())?;
+                Ok(())
+            }
+            Expression::Negated(a) => a.store(writer),
+            Expression::Sum(a, b) => {
+                a.store(writer)?;
+                b.store(writer)?;
+                Ok(())
+            }
+            Expression::Product(a, b) => {
+                a.store(writer)?;
+                b.store(writer)?;
+                Ok(())
+            }
+            Expression::Scaled(a, f) => {
+                a.store(writer)?;
+                writer.write(&mut f.to_repr().as_ref())?;
+                Ok(())
+            }
+            Expression::Selector(_) => unreachable!(),
         }
     }
 }
 
-fn encode_expression<F: FieldExt, W: io::Write>(
-    e: &Expression<F>,
-    writer: &mut W,
-) -> io::Result<()> {
-    writer.write(&mut (expression_code(e) as u32).to_le_bytes())?;
-    match e {
-        Expression::Constant(scalar) => {
-            writer.write(&mut scalar.to_repr().as_ref())?;
-            Ok(())
-        }
-        Expression::Fixed {
-            query_index,
-            column_index,
-            rotation,
-        } => {
-            writer.write(&(*query_index as u32).to_le_bytes())?;
-            writer.write(&(*column_index as u32).to_le_bytes())?;
-            writer.write(&(rotation.0 as u32).to_le_bytes())?;
-            Ok(())
-        }
-        Expression::Advice {
-            query_index,
-            column_index,
-            rotation,
-        } => {
-            writer.write(&(*query_index as u32).to_le_bytes())?;
-            writer.write(&(*column_index as u32).to_le_bytes())?;
-            writer.write(&(rotation.0 as u32).to_le_bytes())?;
-            Ok(())
-        }
-        Expression::Instance {
-            query_index,
-            column_index,
-            rotation,
-        } => {
-            writer.write(&(*query_index as u32).to_le_bytes())?;
-            writer.write(&(*column_index as u32).to_le_bytes())?;
-            writer.write(&(rotation.0 as u32).to_le_bytes())?;
-            Ok(())
-        }
-        Expression::Negated(a) => encode_expression(&a, writer),
-        Expression::Sum(a, b) => {
-            encode_expression(&a, writer)?;
-            encode_expression(&b, writer)?;
-            Ok(())
-        }
-        Expression::Product(a, b) => {
-            encode_expression(&a, writer)?;
-            encode_expression(&b, writer)?;
-            Ok(())
-        }
-        Expression::Scaled(a, f) => {
-            encode_expression(&a, writer)?;
-            writer.write(&mut f.to_repr().as_ref())?;
-            Ok(())
-        }
 
-        Expression::Selector(_) => unreachable!(),
-    }
-}
 
 #[derive (Debug)]
 pub struct AssignWitnessCollection<'a, C: CurveAffine> {
@@ -632,6 +677,38 @@ impl<'a, C: CurveAffine> Assignment<C::Scalar> for AssignWitnessCollection<'a, C
     }
 }
 
+impl<B:Clone, F: FieldExt> Serializable for Polynomial<Assigned<F>, B> {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        Ok (Polynomial::new(Vec::<Assigned<F>>::fetch(reader)?))
+    }
+    /// Reads a compressed element from the buffer and attempts to parse it
+    /// using `from_bytes`.
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        self.values.store(writer)?;
+        Ok(())
+    }
+}
+
+impl Serializable for Assembly {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        let assembly = Assembly {
+            columns: Vec::fetch(reader)?,
+            mapping: Vec::fetch(reader)?,
+            aux: Vec::fetch(reader)?,
+            sizes: Vec::fetch(reader)?,
+        };
+        Ok (assembly)
+    }
+    /// Reads a compressed element from the buffer and attempts to parse it
+    /// using `from_bytes`.
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        self.columns.store(writer)?;
+        self.mapping.store(writer)?;
+        self.aux.store(writer)?;
+        self.sizes.store(writer)?;
+        Ok(())
+    }
+}
 
 impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
     pub fn store_witness<
@@ -669,11 +746,7 @@ impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
             config.clone(),
             meta.constants.clone(),
         )?;
-        for w in witness.advice {
-            for c in w.iter() {
-                write_assigned_code(&c, writer)?;
-            }
-        }
+        witness.advice.store(writer)?;
         Ok(())
     }
 
@@ -681,16 +754,14 @@ impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
         R: std::io::Read,
     > (
         params: &Params<C>,
-        pk: &ProvingKey<C>,
+        _pk: &ProvingKey<C>,
         instances: &'a [&'a [C::Scalar]],
         unusable_rows_start: usize,
         reader: &mut R,
     ) -> Result<AssignWitnessCollection<'a, C>, Error> {
-        let domain = &pk.get_vk().domain;
-        let meta = &pk.get_vk().cs;
-        let mut witness = AssignWitnessCollection {
+        let witness = AssignWitnessCollection {
             k: params.k,
-            advice: vec![domain.empty_lagrange_assigned(); meta.num_advice_columns],
+            advice: Vec::fetch(reader)?,
             instances,
             // The prover will not be allowed to assign values to advice
             // cells that exist within inactive rows, which include some
@@ -700,11 +771,6 @@ impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
             _marker: std::marker::PhantomData,
         };
 
-        for w in witness.advice.iter_mut() {
-            for c in w.iter_mut() {
-                *c = read_assigned_code(reader)?;
-            }
-        }
         Ok(witness)
     }
 }
@@ -724,34 +790,63 @@ fn assigned_code<F: FieldExt>(e: &Assigned<F>) -> AssignedCode {
     }
 }
 
-fn read_assigned_code<F: FieldExt, R: io::Read>(reader: &mut R) -> io::Result<Assigned<F>> {
-    let code = read_u32(reader)?;
-    match num::FromPrimitive::from_u32(code).unwrap() {
-        AssignedCode::Zero => Ok(Assigned::Zero),
-        AssignedCode::Trivial => {
-            let scalar = F::read(reader)?;
-            Ok(Assigned::Trivial(scalar))
-        },
-        AssignedCode::Rational => {
-            let p = F::read(reader)?;
-            let q = F::read(reader)?;
-            Ok(Assigned::Rational(p, q))
+impl<F: FieldExt> Serializable for Assigned<F> {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Assigned<F>> {
+        let code = read_u32(reader)?;
+        match num::FromPrimitive::from_u32(code).unwrap() {
+            AssignedCode::Zero => Ok(Assigned::Zero),
+            AssignedCode::Trivial => {
+                let scalar = F::read(reader)?;
+                Ok(Assigned::Trivial(scalar))
+            },
+            AssignedCode::Rational => {
+                let p = F::read(reader)?;
+                let q = F::read(reader)?;
+                Ok(Assigned::Rational(p, q))
+            }
+        }
+    }
+
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        writer.write(&mut (assigned_code(self) as u32).to_le_bytes())?;
+        match self {
+            Assigned::Zero => Ok(()),
+            Assigned::Trivial(f) => {
+                writer.write(&mut f.to_repr().as_ref())?;
+                Ok(())
+            },
+            Assigned::Rational(p, q) => {
+                writer.write(&mut p.to_repr().as_ref())?;
+                writer.write(&mut q.to_repr().as_ref())?;
+                Ok(())
+            },
         }
     }
 }
 
-fn write_assigned_code<F: FieldExt, W: io::Write>(e: &Assigned<F>, writer: &mut W) -> io::Result<()> {
-    writer.write(&mut (assigned_code(e) as u32).to_le_bytes())?;
-    match e {
-        Assigned::Zero => Ok(()),
-        Assigned::Trivial(f) => {
-            writer.write(&mut f.to_repr().as_ref())?;
-            Ok(())
-        },
-        Assigned::Rational(p, q) => {
-            writer.write(&mut p.to_repr().as_ref())?;
-            writer.write(&mut q.to_repr().as_ref())?;
-            Ok(())
-        },
-    }
+pub fn store_pk_info<C:CurveAffine, ConcreteCircuit, W: io::Write>(
+    params: &Params<C>,
+    vk: &VerifyingKey<C>,
+    circuit: &ConcreteCircuit,
+    writer: &mut W,
+) -> io::Result<()> where
+    ConcreteCircuit: Circuit<C::Scalar>
+{
+    let (fixed, permutation) = generate_pk_info(params, vk, circuit).unwrap();
+    fixed.store(writer)?;
+    permutation.store(writer)?;
+    Ok(())
 }
+
+pub fn fetch_pk_info<C: CurveAffine, R: io::Read>(
+    params: &Params<C>,
+    vk: &VerifyingKey<C>,
+    reader: &mut R,
+) -> io::Result<ProvingKey<C>>
+{
+    let fixed = Vec::fetch(reader)?;
+    let permutation = Assembly::fetch(reader)?;
+    let pkey = keygen_pk_from_info(params, vk, fixed, permutation).unwrap(); 
+    Ok(pkey)
+}
+
