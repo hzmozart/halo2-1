@@ -1,6 +1,7 @@
-use std::{io, ops::RangeTo};
+use std::{io, ops::RangeTo, fs::{OpenOptions, File}};
 use ff::Field;
-use crate::{arithmetic::{CurveAffine, FieldExt}, plonk::{generate_pk_info, keygen_pk_from_info}};
+use rayon::prelude::{IntoParallelIterator, IndexedParallelIterator, ParallelIterator};
+use crate::{arithmetic::{CurveAffine, FieldExt}, plonk::{generate_pk_info, keygen_pk_from_info}, poly::batch_invert_assigned};
 use num_derive::FromPrimitive;
 use num;
 use crate::{
@@ -13,6 +14,7 @@ use crate::{
 };
 use crate::plonk::circuit::FloorPlanner;
 use std::marker::PhantomData;
+use memmap::{MmapMut, MmapOptions};
 
 pub(crate) trait CurveRead: CurveAffine {
     /// Reads a compressed element from the buffer and attempts to parse it
@@ -713,15 +715,15 @@ impl Serializable for Assembly {
 impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
     pub fn store_witness<
         ConcreteCircuit: Circuit<C::Scalar>,
-        W: std::io::Write,
     > (
         params: &Params<C>,
         pk: &ProvingKey<C>,
         instances: &[&[C::Scalar]],
         unusable_rows_start: usize,
         circuit: &ConcreteCircuit,
-        writer: &mut W,
+        fd: &mut File,
     ) -> Result<(), Error> {
+        use std::io::prelude::*;
         let mut meta = ConstraintSystem::default();
         let config = ConcreteCircuit::configure(&mut meta);
 
@@ -746,32 +748,45 @@ impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
             config.clone(),
             meta.constants.clone(),
         )?;
-        witness.advice.store(writer)?;
+
+        let bundlesize = params.k + 5;
+        let advice = batch_invert_assigned(witness.advice);
+        fd.set_len(4 + (1u64 << bundlesize)).unwrap();
+        fd.write(&(advice.len() as u32).to_le_bytes())?;
+        fd.set_len(4 + ((advice.len() as u64) << bundlesize)).unwrap();
+        {
+            advice.into_par_iter().enumerate().for_each(|(i, s2)| {
+                let mut mmap = unsafe { MmapOptions::new().offset(4 + ((i as u64) << bundlesize)).len(1 << bundlesize).map_mut(&fd).unwrap() };
+                let s: &[u8] = unsafe {
+                    std::slice::from_raw_parts(s2.as_ptr() as *const C::Scalar as *const u8, 1 << bundlesize)
+                };
+                (&mut mmap).copy_from_slice(s);
+            });
+        }
+
+        //witness.advice.store(writer)?;
         Ok(())
     }
 
-    pub fn fetch_witness<
-        R: std::io::Read,
-    > (
+    pub fn fetch_witness (
         params: &Params<C>,
-        _pk: &ProvingKey<C>,
-        instances: &'a [&'a [C::Scalar]],
-        unusable_rows_start: usize,
-        reader: &mut R,
-    ) -> Result<AssignWitnessCollection<'a, C>, Error> {
-        let witness = AssignWitnessCollection {
-            k: params.k,
-            advice: Vec::fetch(reader)?,
-            instances,
-            // The prover will not be allowed to assign values to advice
-            // cells that exist within inactive rows, which include some
-            // number of blinding factors and an extra row for use in the
-            // permutation argument.
-            usable_rows: ..unusable_rows_start,
-            _marker: std::marker::PhantomData,
-        };
+        fd: &mut File,
+    ) -> Result<Vec<Polynomial<C::Scalar, LagrangeCoeff>>, Error> {
+        let len = read_u32(fd)?;
+        let bundlesize = params.k + 5;
+        let advice: Vec<Polynomial<_, LagrangeCoeff>> = (0..len)
+            .into_par_iter()
+            .map(|i| {
+                let mmap = unsafe { MmapOptions::new().offset(4 + ((i as u64) << bundlesize)).len(1 << bundlesize).map(&fd).unwrap() };
+                let s: &[C::Scalar] =
+                unsafe { std::slice::from_raw_parts(mmap.as_ptr() as *const C::Scalar, 1 << params.k) };
+                let mut s2 = vec![];
+                s2.extend_from_slice(s);
+                Polynomial::new(s2)
+            })
+            .collect();
 
-        Ok(witness)
+        Ok(advice)
     }
 }
 

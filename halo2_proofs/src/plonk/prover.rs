@@ -3,6 +3,7 @@ use ff::Field;
 use group::Curve;
 use rand_core::RngCore;
 use std::env::var;
+use std::fs::File;
 use std::ops::RangeTo;
 use std::sync::atomic::AtomicUsize;
 use std::time::Instant;
@@ -692,17 +693,16 @@ fn create_single_instances<
 pub fn create_witness<
     C: CurveAffine,
     ConcreteCircuit: Circuit<C::Scalar>,
-    W: std::io::Write
 >(
     params: &Params<C>,
     pk: &ProvingKey<C>,
     circuit: &ConcreteCircuit,
     instances: &[&[C::Scalar]],
-    writer: &mut W,
+    fd: &mut File,
 ) -> Result<(), Error> {
     let meta = &pk.vk.cs;
     let unusable_rows_start = params.n as usize - (meta.blinding_factors() + 1);
-    AssignWitnessCollection::store_witness(params, pk, instances, unusable_rows_start, circuit, writer)?;
+    AssignWitnessCollection::store_witness(params, pk, instances, unusable_rows_start, circuit, fd)?;
     Ok(())
 }
 
@@ -712,14 +712,13 @@ pub fn create_proof_from_witness<
     E: EncodedChallenge<C>,
     R: RngCore,
     T: TranscriptWrite<C, E>,
-    Reader: std::io::Read,
 >(
     params: &Params<C>,
     pk: &ProvingKey<C>,
     instances: &[&[&[C::Scalar]]],
     mut rng: R,
     transcript: &mut T,
-    reader: &mut Reader,
+    fd: &mut File,
 ) -> Result<(), Error> {
     // Selector optimizations cannot be applied here; use the ConstraintSystem
     // from the verification key.
@@ -739,12 +738,10 @@ pub fn create_proof_from_witness<
 
     let advice: Vec<AdviceSingle<C>> =
         instances.iter()
-        .map(|instances| -> Result<AdviceSingle<C>, Error> {
+        .map(|_| -> Result<AdviceSingle<C>, Error> {
             let unusable_rows_start = params.n as usize - (meta.blinding_factors() + 1);
 
-            let witness = AssignWitnessCollection::fetch_witness(params, pk, instances, unusable_rows_start, reader)?;
-
-            let mut advice = batch_invert_assigned(witness.advice);
+            let mut advice = AssignWitnessCollection::fetch_witness(params, fd)?;
 
             // Add blinding factors to advice columns
             for advice in &mut advice {
