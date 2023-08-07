@@ -692,20 +692,20 @@ impl<B:Clone, F: FieldExt> Serializable for Polynomial<Assigned<F>, B> {
 impl Serializable for Assembly {
     fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
         let assembly = Assembly {
-            columns: Vec::fetch(reader)?,
+            columns: vec![], //Vec::fetch(reader)?,
             mapping: Vec::fetch(reader)?,
-            aux: Vec::fetch(reader)?,
-            sizes: Vec::fetch(reader)?,
+            aux: vec![], //Vec::fetch(reader)?,
+            sizes: vec![], //Vec::fetch(reader)?,
         };
         Ok (assembly)
     }
     /// Reads a compressed element from the buffer and attempts to parse it
     /// using `from_bytes`.
     fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        self.columns.store(writer)?;
+        //self.columns.store(writer)?;
         self.mapping.store(writer)?;
-        self.aux.store(writer)?;
-        self.sizes.store(writer)?;
+        //self.aux.store(writer)?;
+        //self.sizes.store(writer)?;
         Ok(())
     }
 }
