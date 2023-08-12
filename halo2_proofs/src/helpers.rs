@@ -1,20 +1,30 @@
-use std::{io, ops::RangeTo, fs::{OpenOptions, File}};
-use ff::Field;
-use rayon::prelude::{IntoParallelIterator, IndexedParallelIterator, ParallelIterator};
-use crate::{arithmetic::{CurveAffine, FieldExt}, plonk::{generate_pk_info, keygen_pk_from_info}, poly::batch_invert_assigned};
-use num_derive::FromPrimitive;
-use num;
+use crate::plonk::circuit::FloorPlanner;
+use crate::{
+    arithmetic::{CurveAffine, FieldExt},
+    plonk::{generate_pk_info, keygen_pk_from_info},
+    poly::batch_invert_assigned,
+};
 use crate::{
     plonk::{
-        VerifyingKey, permutation::{self, keygen::Assembly}, Column, Any, self, ColumnType, VirtualCell, Fixed, ConstraintSystem, Advice, Instance, Expression, Gate, Assigned, Assignment, Selector, Error, Circuit, ProvingKey
+        self,
+        permutation::{self, keygen::Assembly},
+        Advice, Any, Assigned, Assignment, Circuit, Column, ColumnType, ConstraintSystem, Error,
+        Expression, Fixed, Gate, Instance, ProvingKey, Selector, VerifyingKey, VirtualCell,
     },
-    poly::{
-        EvaluationDomain, Rotation, Polynomial, LagrangeCoeff, commitment::Params
-    }, transcript::EncodedChallenge
+    poly::{commitment::Params, EvaluationDomain, LagrangeCoeff, Polynomial, Rotation},
+    transcript::EncodedChallenge,
 };
-use crate::plonk::circuit::FloorPlanner;
-use std::marker::PhantomData;
+use ff::Field;
 use memmap::{MmapMut, MmapOptions};
+use num;
+use num_derive::FromPrimitive;
+use rayon::prelude::{IndexedParallelIterator, IntoParallelIterator, ParallelIterator};
+use std::marker::PhantomData;
+use std::{
+    fs::{File, OpenOptions},
+    io,
+    ops::RangeTo,
+};
 
 pub(crate) trait CurveRead: CurveAffine {
     /// Reads a compressed element from the buffer and attempts to parse it
@@ -44,13 +54,13 @@ fn read_u32<R: io::Read>(reader: &mut R) -> io::Result<u32> {
     Ok(u32::from_le_bytes(r))
 }
 
-impl Serializable for usize {
+impl Serializable for u32 {
     fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
         let u = read_u32(reader)?;
-        Ok(u as usize)
+        Ok(u)
     }
     fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
-        writer.write(&mut (*self as u32).to_le_bytes())?;
+        writer.write(&mut (*self).to_le_bytes())?;
         Ok(())
     }
 }
@@ -64,35 +74,26 @@ impl<T: Serializable> Serializable for (T, T) {
         self.1.store(writer)?;
         Ok(())
     }
-
 }
 
 impl<C: CurveAffine> Serializable for VerifyingKey<C> {
-    fn store<W: io::Write>(
-        &self,
-        writer: &mut W,
-    ) -> io::Result<()> {
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         let j = (self.domain.get_quotient_poly_degree() + 1) as u32; // quotient_poly_degree is j-1
         let k = self.domain.k() as u32;
-        println!("store vkey j is {}, k is {}", j ,k);
         writer.write(&mut j.to_le_bytes())?;
         writer.write(&mut k.to_le_bytes())?;
         write_cs::<C, W>(&self.cs, writer)?;
-        //println!("write cs {:?}", &vkey.cs);
         self.write(writer)?;
         Ok(())
     }
 
-    fn fetch<R: io::Read>(
-        reader: &mut R,
-    ) -> io::Result<VerifyingKey<C>> {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<VerifyingKey<C>> {
         let j = read_u32(reader)?;
         let k = read_u32(reader)?;
-        println!("j is {}, k is {}", j ,k);
         let domain: EvaluationDomain<C::Scalar> = EvaluationDomain::new(j, k);
         let cs = read_cs::<C, R>(reader)?;
 
-        println!("read cs {:?}", cs);
+        //println!("read cs {:?}", cs);
         let fixed_commitments: Vec<_> = (0..cs.num_fixed_columns)
             .map(|_| C::read(reader))
             .collect::<Result<_, _>>()?;
@@ -108,20 +109,15 @@ impl<C: CurveAffine> Serializable for VerifyingKey<C> {
     }
 }
 
-impl<T:Serializable> Serializable for Vec<T> {
-    fn store<W: io::Write> (
-        &self,
-        writer: &mut W,
-    ) -> io::Result<()> {
+impl<T: Serializable> Serializable for Vec<T> {
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         writer.write(&mut (self.len() as u32).to_le_bytes())?;
         for c in self.iter() {
             c.store(writer)?;
         }
         Ok(())
     }
-    fn fetch<R: io::Read>(
-        reader: &mut R,
-    ) -> io::Result<Vec<T>> {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Vec<T>> {
         let len = read_u32(reader)?;
         let mut v = vec![];
         for _ in 0..len {
@@ -210,7 +206,7 @@ fn write_queries<T: ColumnType, W: std::io::Write>(
     Ok(())
 }
 
-fn write_virtual_cells <W: std::io::Write>(
+fn write_virtual_cells<W: std::io::Write>(
     columns: &Vec<VirtualCell>,
     writer: &mut W,
 ) -> std::io::Result<()> {
@@ -237,16 +233,14 @@ fn read_queries<T: ColumnType, R: std::io::Read>(
     Ok(queries)
 }
 
-fn read_virtual_cells<R: std::io::Read>(
-    reader: &mut R,
-) -> std::io::Result<Vec<VirtualCell>> {
+fn read_virtual_cells<R: std::io::Read>(reader: &mut R) -> std::io::Result<Vec<VirtualCell>> {
     let mut vcells = vec![];
     let len = read_u32(reader)?;
     for _ in 0..len {
         let column = Column::<Any>::fetch(reader)?;
         let rotation = read_u32(reader)?;
         let rotation = Rotation(rotation as i32); //u32 to i32??
-        vcells.push(VirtualCell {column, rotation})
+        vcells.push(VirtualCell { column, rotation })
     }
     Ok(vcells)
 }
@@ -381,7 +375,7 @@ fn read_gates<C: CurveAffine, R: std::io::Read>(
     for _ in 0..nb_gates {
         gates.push(Gate::new_with_polys_and_queries(
             Vec::<Expression<C::Scalar>>::fetch(reader)?,
-            read_virtual_cells(reader)?
+            read_virtual_cells(reader)?,
         ));
     }
     Ok(gates)
@@ -485,10 +479,7 @@ impl<F: FieldExt> Serializable for Expression<F> {
         }
     }
 
-    fn store<W: io::Write>(
-        &self,
-        writer: &mut W,
-    ) -> io::Result<()> {
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         writer.write(&mut (expression_code(self) as u32).to_le_bytes())?;
         match self {
             Expression::Constant(scalar) => {
@@ -546,9 +537,7 @@ impl<F: FieldExt> Serializable for Expression<F> {
     }
 }
 
-
-
-#[derive (Debug)]
+#[derive(Debug)]
 pub struct AssignWitnessCollection<'a, C: CurveAffine> {
     pub k: u32,
     pub advice: Vec<Polynomial<Assigned<C::Scalar>, LagrangeCoeff>>,
@@ -570,12 +559,7 @@ impl<'a, C: CurveAffine> Assignment<C::Scalar> for AssignWitnessCollection<'a, C
         // Do nothing; we don't care about regions in this context.
     }
 
-    fn enable_selector<A, AR>(
-        &mut self,
-        _: A,
-        _: &Selector,
-        _: usize,
-    ) -> Result<(), Error>
+    fn enable_selector<A, AR>(&mut self, _: A, _: &Selector, _: usize) -> Result<(), Error>
     where
         A: FnOnce() -> AR,
         AR: Into<String>,
@@ -645,13 +629,7 @@ impl<'a, C: CurveAffine> Assignment<C::Scalar> for AssignWitnessCollection<'a, C
         Ok(())
     }
 
-    fn copy(
-        &mut self,
-        _: Column<Any>,
-        _: usize,
-        _: Column<Any>,
-        _: usize,
-    ) -> Result<(), Error> {
+    fn copy(&mut self, _: Column<Any>, _: usize, _: Column<Any>, _: usize) -> Result<(), Error> {
         // We only care about advice columns here
 
         Ok(())
@@ -679,9 +657,9 @@ impl<'a, C: CurveAffine> Assignment<C::Scalar> for AssignWitnessCollection<'a, C
     }
 }
 
-impl<B:Clone, F: FieldExt> Serializable for Polynomial<Assigned<F>, B> {
+impl<B: Clone, F: FieldExt> Serializable for Polynomial<Assigned<F>, B> {
     fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
-        Ok (Polynomial::new(Vec::<Assigned<F>>::fetch(reader)?))
+        Ok(Polynomial::new(Vec::<Assigned<F>>::fetch(reader)?))
     }
     /// Reads a compressed element from the buffer and attempts to parse it
     /// using `from_bytes`.
@@ -696,10 +674,10 @@ impl Serializable for Assembly {
         let assembly = Assembly {
             columns: vec![], //Vec::fetch(reader)?,
             mapping: Vec::fetch(reader)?,
-            aux: vec![], //Vec::fetch(reader)?,
+            aux: vec![],   //Vec::fetch(reader)?,
             sizes: vec![], //Vec::fetch(reader)?,
         };
-        Ok (assembly)
+        Ok(assembly)
     }
     /// Reads a compressed element from the buffer and attempts to parse it
     /// using `from_bytes`.
@@ -713,9 +691,7 @@ impl Serializable for Assembly {
 }
 
 impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
-    pub fn store_witness<
-        ConcreteCircuit: Circuit<C::Scalar>,
-    > (
+    pub fn store_witness<ConcreteCircuit: Circuit<C::Scalar>>(
         params: &Params<C>,
         pk: &ProvingKey<C>,
         instances: &[&[C::Scalar]],
@@ -753,12 +729,22 @@ impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
         let advice = batch_invert_assigned(witness.advice);
         fd.set_len(4 + (1u64 << bundlesize)).unwrap();
         fd.write(&(advice.len() as u32).to_le_bytes())?;
-        fd.set_len(4 + ((advice.len() as u64) << bundlesize)).unwrap();
+        fd.set_len(4 + ((advice.len() as u64) << bundlesize))
+            .unwrap();
         {
             advice.into_par_iter().enumerate().for_each(|(i, s2)| {
-                let mut mmap = unsafe { MmapOptions::new().offset(4 + ((i as u64) << bundlesize)).len(1 << bundlesize).map_mut(&fd).unwrap() };
+                let mut mmap = unsafe {
+                    MmapOptions::new()
+                        .offset(4 + ((i as u64) << bundlesize))
+                        .len(1 << bundlesize)
+                        .map_mut(&fd)
+                        .unwrap()
+                };
                 let s: &[u8] = unsafe {
-                    std::slice::from_raw_parts(s2.as_ptr() as *const C::Scalar as *const u8, 1 << bundlesize)
+                    std::slice::from_raw_parts(
+                        s2.as_ptr() as *const C::Scalar as *const u8,
+                        1 << bundlesize,
+                    )
                 };
                 (&mut mmap).copy_from_slice(s);
             });
@@ -768,7 +754,7 @@ impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
         Ok(())
     }
 
-    pub fn fetch_witness (
+    pub fn fetch_witness(
         params: &Params<C>,
         fd: &mut File,
     ) -> Result<Vec<Polynomial<C::Scalar, LagrangeCoeff>>, Error> {
@@ -777,9 +763,16 @@ impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
         let advice: Vec<Polynomial<_, LagrangeCoeff>> = (0..len)
             .into_par_iter()
             .map(|i| {
-                let mmap = unsafe { MmapOptions::new().offset(4 + ((i as u64) << bundlesize)).len(1 << bundlesize).map(&fd).unwrap() };
-                let s: &[C::Scalar] =
-                unsafe { std::slice::from_raw_parts(mmap.as_ptr() as *const C::Scalar, 1 << params.k) };
+                let mmap = unsafe {
+                    MmapOptions::new()
+                        .offset(4 + ((i as u64) << bundlesize))
+                        .len(1 << bundlesize)
+                        .map(&fd)
+                        .unwrap()
+                };
+                let s: &[C::Scalar] = unsafe {
+                    std::slice::from_raw_parts(mmap.as_ptr() as *const C::Scalar, 1 << params.k)
+                };
                 let mut s2 = vec![];
                 s2.extend_from_slice(s);
                 Polynomial::new(s2)
@@ -813,7 +806,7 @@ impl<F: FieldExt> Serializable for Assigned<F> {
             AssignedCode::Trivial => {
                 let scalar = F::read(reader)?;
                 Ok(Assigned::Trivial(scalar))
-            },
+            }
             AssignedCode::Rational => {
                 let p = F::read(reader)?;
                 let q = F::read(reader)?;
@@ -829,23 +822,24 @@ impl<F: FieldExt> Serializable for Assigned<F> {
             Assigned::Trivial(f) => {
                 writer.write(&mut f.to_repr().as_ref())?;
                 Ok(())
-            },
+            }
             Assigned::Rational(p, q) => {
                 writer.write(&mut p.to_repr().as_ref())?;
                 writer.write(&mut q.to_repr().as_ref())?;
                 Ok(())
-            },
+            }
         }
     }
 }
 
-pub fn store_pk_info<C:CurveAffine, ConcreteCircuit, W: io::Write>(
+pub fn store_pk_info<C: CurveAffine, ConcreteCircuit, W: io::Write>(
     params: &Params<C>,
     vk: &VerifyingKey<C>,
     circuit: &ConcreteCircuit,
     writer: &mut W,
-) -> io::Result<()> where
-    ConcreteCircuit: Circuit<C::Scalar>
+) -> io::Result<()>
+where
+    ConcreteCircuit: Circuit<C::Scalar>,
 {
     let (fixed, permutation) = generate_pk_info(params, vk, circuit).unwrap();
     fixed.store(writer)?;
@@ -857,11 +851,9 @@ pub fn fetch_pk_info<C: CurveAffine, R: io::Read>(
     params: &Params<C>,
     vk: &VerifyingKey<C>,
     reader: &mut R,
-) -> io::Result<ProvingKey<C>>
-{
+) -> io::Result<ProvingKey<C>> {
     let fixed = Vec::fetch(reader)?;
     let permutation = Assembly::fetch(reader)?;
-    let pkey = keygen_pk_from_info(params, vk, fixed, permutation).unwrap(); 
+    let pkey = keygen_pk_from_info(params, vk, fixed, permutation).unwrap();
     Ok(pkey)
 }
-
