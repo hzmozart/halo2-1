@@ -65,9 +65,25 @@ impl Serializable for u32 {
     }
 }
 
-impl<T: Serializable> Serializable for (T, T) {
+impl Serializable for String {
     fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
-        Ok((T::fetch(reader)?, T::fetch(reader)?))
+        let len = read_u32(reader)?;
+        let mut s = vec![0; len as usize];
+        reader.read_exact(&mut s)?;
+        let u = String::from_utf8(s.to_vec()).unwrap();
+        Ok(u)
+    }
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        let bytes = self.as_bytes();
+        writer.write(&mut (bytes.len() as u32).to_le_bytes())?;
+        writer.write(bytes)?;
+        Ok(())
+    }
+}
+
+impl<T: Serializable, TT: Serializable> Serializable for (T, TT) {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        Ok((T::fetch(reader)?, TT::fetch(reader)?))
     }
     fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         self.0.store(writer)?;
@@ -301,6 +317,7 @@ fn write_cs<C: CurveAffine, W: io::Write>(
         p.input_expressions.store(writer)?;
         p.table_expressions.store(writer)?;
     }
+    cs.named_advices.store(writer)?;
     write_gates::<C, W>(&cs.gates, writer)?;
     Ok(())
 }
@@ -336,6 +353,7 @@ fn read_cs<C: CurveAffine, R: io::Read>(reader: &mut R) -> io::Result<Constraint
             table_expressions,
         });
     }
+    let named_advices = Vec::fetch(reader)?;
     let gates = read_gates::<C, R>(reader)?;
     Ok(ConstraintSystem {
         num_fixed_columns,
@@ -348,6 +366,7 @@ fn read_cs<C: CurveAffine, R: io::Read>(reader: &mut R) -> io::Result<Constraint
         num_advice_queries,
         instance_queries,
         fixed_queries,
+        named_advices,
         permutation,
         lookups,
         constants,
