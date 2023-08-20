@@ -296,10 +296,14 @@ pub fn create_proof<
 
             let mut advice = batch_invert_assigned(witness.advice);
 
+            let named = pk.vk.cs.named_advices.clone();
+
             // Add blinding factors to advice columns
-            for advice in &mut advice {
-                for cell in &mut advice[unusable_rows_start..] {
-                    *cell = C::Scalar::random(&mut rng);
+            for (i, advice) in &mut advice.iter_mut().enumerate() {
+                if named.iter().find(|n| n.1 as usize == i).is_none() {
+                    for cell in &mut advice[unusable_rows_start..] {
+                        *cell = C::Scalar::random(&mut rng);
+                    }
                 }
             }
 
