@@ -81,9 +81,9 @@ impl Serializable for String {
     }
 }
 
-impl<T: Serializable, TT: Serializable> Serializable for (T, TT) {
+impl Serializable for (String, u32) {
     fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
-        Ok((T::fetch(reader)?, TT::fetch(reader)?))
+        Ok((String::fetch(reader)?, u32::fetch(reader)?))
     }
     fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
         self.0.store(writer)?;
@@ -91,6 +91,51 @@ impl<T: Serializable, TT: Serializable> Serializable for (T, TT) {
         Ok(())
     }
 }
+
+
+impl Serializable for Vec<(u32, u32)> {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        let u = read_u32(reader)?;
+        let mut buf = vec![0u8; u as usize * 8];
+        reader.read_exact(&mut buf)?;
+        let s: &[(u32,u32)] = unsafe {
+            std::slice::from_raw_parts(buf.as_ptr() as *const (u32, u32), u as usize)
+        };
+        Ok(s.to_vec())
+    }
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        let u = self.len() as u32;
+        u.store(writer)?;
+        let s: &[u8] = unsafe {
+            std::slice::from_raw_parts(self.as_ptr() as *const u8, u as usize * 8)
+        };
+        writer.write(s)?;
+        Ok(())
+    }
+}
+
+impl<B:Clone, F: FieldExt> Serializable for Polynomial<F, B> {
+    fn fetch<R: io::Read>(reader: &mut R) -> io::Result<Self> {
+        let u = read_u32(reader)?;
+        let mut buf = vec![0u8; u as usize * 32];
+        reader.read_exact(&mut buf)?;
+        let s: &[F] = unsafe {
+            std::slice::from_raw_parts(buf.as_ptr() as *const F, u as usize)
+        };
+        Ok(Polynomial::new(s.to_vec()))
+    }
+    fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
+        let u = self.values.len() as u32;
+        u.store(writer)?;
+        let s: &[u8] = unsafe {
+            std::slice::from_raw_parts(self.values.as_ptr() as *const u8, u as usize * 32)
+        };
+        writer.write(s)?;
+        Ok(())
+    }
+}
+
+
 
 impl<C: CurveAffine> Serializable for VerifyingKey<C> {
     fn store<W: io::Write>(&self, writer: &mut W) -> io::Result<()> {
@@ -860,9 +905,16 @@ pub fn store_pk_info<C: CurveAffine, ConcreteCircuit, W: io::Write>(
 where
     ConcreteCircuit: Circuit<C::Scalar>,
 {
+    use ark_std::{start_timer, end_timer};
+    let timer = start_timer!(|| "test generate_pk_info ...");
     let (fixed, permutation) = generate_pk_info(params, vk, circuit).unwrap();
+    end_timer!(timer);
+    let timer = start_timer!(|| "test store fixed ...");
     fixed.store(writer)?;
+    end_timer!(timer);
+    let timer = start_timer!(|| "test store permutation ...");
     permutation.store(writer)?;
+    end_timer!(timer);
     Ok(())
 }
 

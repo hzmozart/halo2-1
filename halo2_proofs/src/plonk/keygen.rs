@@ -354,7 +354,7 @@ where
 pub(crate) fn keygen_pk_from_info <C>(
     params: &Params<C>,
     vk: &VerifyingKey<C>,
-    fixed: Vec<Polynomial<Assigned<C::Scalar>, LagrangeCoeff>>,
+    fixed: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
     permutation: permutation::keygen::Assembly,
 ) -> Result<ProvingKey<C>, Error>
 where
@@ -362,14 +362,7 @@ where
 {
     let cs = vk.cs.clone();
     let selectors = vec![vec![false; params.n as usize]; cs.num_selectors];
-    let mut fixed = batch_invert_assigned(fixed);
     let (cs, selector_polys) = cs.compress_selectors(selectors);
-    fixed.extend(
-        selector_polys
-            .into_iter()
-            .map(|poly| vk.domain.lagrange_from_vec(poly)),
-    );
-
     let fixed_polys: Vec<_> = fixed
         .iter()
         .map(|poly| vk.domain.lagrange_to_coeff(poly.clone()))
@@ -437,7 +430,7 @@ pub(crate) fn generate_pk_info<C, ConcreteCircuit>(
     params: &Params<C>,
     vk: &VerifyingKey<C>,
     circuit: &ConcreteCircuit,
-) -> Result<(Vec<Polynomial<Assigned<C::Scalar>, LagrangeCoeff>>,permutation::keygen::Assembly), Error>
+) -> Result<(Vec<Polynomial<C::Scalar, LagrangeCoeff>>,permutation::keygen::Assembly), Error>
 where
     C: CurveAffine,
     ConcreteCircuit: Circuit<C::Scalar>,
@@ -467,6 +460,7 @@ where
         config,
         cs.constants.clone(),
     )?;
-    Ok((assembly.fixed, assembly.permutation))
+    let fixed = batch_invert_assigned(assembly.fixed);
+    Ok((fixed, assembly.permutation))
 }
 
