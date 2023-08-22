@@ -351,7 +351,7 @@ where
 }
 
 /// Generate a `ProvingKey` from a `VerifyingKey` and an instance of `Circuit`.
-pub(crate) fn keygen_pk_from_info <C>(
+pub(crate) fn keygen_pk_from_info<C>(
     params: &Params<C>,
     vk: &VerifyingKey<C>,
     fixed: Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
@@ -361,8 +361,11 @@ where
     C: CurveAffine,
 {
     let cs = vk.cs.clone();
-    let selectors = vec![vec![false; params.n as usize]; cs.num_selectors];
-    let (cs, selector_polys) = cs.compress_selectors(selectors);
+    assert!(cs.num_selectors == 0);
+    //We do not support the case when selectors exists
+    //let selectors = vec![vec![false; params.n as usize]; cs.num_selectors];
+    let selectors = vec![];
+    let (cs, _) = cs.compress_selectors(selectors);
     let fixed_polys: Vec<_> = fixed
         .iter()
         .map(|poly| vk.domain.lagrange_to_coeff(poly.clone()))
@@ -373,8 +376,7 @@ where
         .map(|poly| vk.domain.coeff_to_extended(poly.clone()))
         .collect();
 
-    let permutation_pk = permutation
-        .build_pk(params, &vk.domain, &cs.permutation);
+    let permutation_pk = permutation.build_pk(params, &vk.domain, &cs.permutation);
 
     // Compute l_0(X)
     // TODO: this can be done more efficiently
@@ -430,15 +432,19 @@ pub(crate) fn generate_pk_info<C, ConcreteCircuit>(
     params: &Params<C>,
     vk: &VerifyingKey<C>,
     circuit: &ConcreteCircuit,
-) -> Result<(Vec<Polynomial<C::Scalar, LagrangeCoeff>>,permutation::keygen::Assembly), Error>
+) -> Result<
+    (
+        Vec<Polynomial<C::Scalar, LagrangeCoeff>>,
+        permutation::keygen::Assembly,
+    ),
+    Error,
+>
 where
     C: CurveAffine,
     ConcreteCircuit: Circuit<C::Scalar>,
 {
     let mut cs = ConstraintSystem::default();
     let config = ConcreteCircuit::configure(&mut cs);
-
-    let cs = cs;
 
     if (params.n as usize) < cs.minimum_rows() {
         return Err(Error::not_enough_rows_available(params.k));
@@ -463,4 +469,3 @@ where
     let fixed = batch_invert_assigned(assembly.fixed);
     Ok((fixed, assembly.permutation))
 }
-

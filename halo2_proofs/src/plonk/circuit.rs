@@ -1473,14 +1473,14 @@ impl<F: Field> ConstraintSystem<F> {
 
     /// Allocate a new advice column
     pub fn named_advice_column(&mut self, name: String) -> Column<Advice> {
-        let tmp = Column {
+        let res = Column {
             index: self.num_advice_columns,
             column_type: Advice,
         };
         self.named_advices.push((name, self.num_advice_columns as u32));
         self.num_advice_columns += 1;
         self.num_advice_queries.push(0);
-        tmp
+        res
     }
 
     /// Allocate a new instance column
