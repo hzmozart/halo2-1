@@ -807,7 +807,55 @@ impl ParaSerializable for Assembly {
     }
 }
 
+pub fn dump_named_witness<'a, C:CurveAffine, ConcreteCircuit: Circuit<C::Scalar>>(
+    params: &Params<C>,
+    pk: &ProvingKey<C>,
+    instances: &[&[C::Scalar]],
+    unusable_rows_start: usize,
+    circuit: &ConcreteCircuit,
+    fd: &mut File,
+) -> Result<(), Error> {
+    use std::io::prelude::*;
+    let mut meta = ConstraintSystem::default();
+    let config = ConcreteCircuit::configure(&mut meta);
+
+    let domain = &pk.get_vk().domain;
+    let meta = &pk.get_vk().cs;
+    let mut witness = AssignWitnessCollection::<C> {
+        k: params.k,
+        advice: vec![domain.empty_lagrange_assigned(); meta.num_advice_columns],
+        instances,
+        // The prover will not be allowed to assign values to advice
+        // cells that exist within inactive rows, which include some
+        // number of blinding factors and an extra row for use in the
+        // permutation argument.
+        usable_rows: ..unusable_rows_start,
+        _marker: std::marker::PhantomData,
+    };
+
+    // Synthesize the circuit to obtain the witness and other information.
+    ConcreteCircuit::FloorPlanner::synthesize(
+        &mut witness,
+        circuit,
+        config.clone(),
+        meta.constants.clone(),
+    )?;
+
+    let advice = batch_invert_assigned(witness.advice);
+    for (n, c) in meta.named_advices.clone() {
+        writeln!(fd, "column name {:?}", n)?;
+        for ws in advice[c as usize].values.clone() {
+            writeln!(fd, "{:?}", ws)?;
+        }
+    }
+    Ok(())
+}
+
+
+
+
 impl<'a, C: CurveAffine> AssignWitnessCollection<'a, C> {
+
     pub fn store_witness<ConcreteCircuit: Circuit<C::Scalar>>(
         params: &Params<C>,
         pk: &ProvingKey<C>,

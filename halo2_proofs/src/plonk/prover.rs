@@ -8,7 +8,7 @@ use std::ops::RangeTo;
 use std::sync::atomic::AtomicUsize;
 use std::time::Instant;
 use std::{iter, sync::atomic::Ordering};
-use crate::helpers::AssignWitnessCollection;
+use crate::helpers::{AssignWitnessCollection, dump_named_witness};
 
 use super::{
     circuit::{
@@ -707,6 +707,23 @@ pub fn create_witness<
     let meta = &pk.vk.cs;
     let unusable_rows_start = params.n as usize - (meta.blinding_factors() + 1);
     AssignWitnessCollection::store_witness(params, pk, instances, unusable_rows_start, circuit, fd)?;
+    Ok(())
+}
+
+/// generate and write witness to files
+pub fn create_named_witness<
+    C: CurveAffine,
+    ConcreteCircuit: Circuit<C::Scalar>,
+>(
+    params: &Params<C>,
+    pk: &ProvingKey<C>,
+    circuit: &ConcreteCircuit,
+    instances: &[&[C::Scalar]],
+    fd: &mut File,
+) -> Result<(), Error> {
+    let meta = &pk.vk.cs;
+    let unusable_rows_start = params.n as usize - (meta.blinding_factors() + 1);
+    dump_named_witness(params, pk, instances, unusable_rows_start, circuit, fd)?;
     Ok(())
 }
 
