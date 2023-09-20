@@ -8,6 +8,7 @@ use rand_core::RngCore;
 use rayon::prelude::ParallelIterator;
 
 use super::Argument;
+use crate::plonk::CountingRng;
 use crate::poly::Rotation;
 use crate::{
     arithmetic::{eval_polynomial, CurveAffine, FieldExt},
@@ -52,7 +53,7 @@ impl<C: CurveAffine> Argument<C> {
             .collect::<Vec<_>>();
 
         random_poly.par_iter_mut().for_each(|coeff| {
-            let mut rng = thread_rng();
+            let mut rng = CountingRng(1);
             *coeff = (C::ScalarExt::random(&mut rng)
                 + random[rng.next_u64() as usize % domain.k() as usize])
                 * (C::ScalarExt::random(&mut rng)

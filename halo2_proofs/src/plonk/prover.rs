@@ -1,40 +1,79 @@
-use ark_std::{end_timer, start_timer};
+use crate::helpers::AssignWitnessCollection;
+use ark_std::end_timer;
+use ark_std::start_timer;
 use ff::Field;
 use group::Curve;
 use rand_core::RngCore;
 use std::env::var;
 use std::fs::File;
+use std::iter;
 use std::ops::RangeTo;
 use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::time::Instant;
-use std::{iter, sync::atomic::Ordering};
-use crate::helpers::AssignWitnessCollection;
 
-use super::{
-    circuit::{
-        Advice, Any, Assignment, Circuit, Column, ConstraintSystem, Fixed, FloorPlanner, Instance,
-        Selector,
-    },
-    lookup, permutation, vanishing, ChallengeBeta, ChallengeGamma, ChallengeTheta, ChallengeX,
-    ChallengeY, Error, ProvingKey,
-};
-use crate::{
-    arithmetic::{eval_polynomial, BaseExt, CurveAffine, FieldExt},
-    plonk::Assigned,
-};
-use crate::{
-    plonk::Expression,
-    poly::{
-        self,
-        commitment::{Blind, Params},
-        multiopen::{self, ProverQuery},
-        Coeff, ExtendedLagrangeCoeff, LagrangeCoeff, Polynomial, Rotation,
-    },
-};
-use crate::{
-    poly::batch_invert_assigned,
-    transcript::{EncodedChallenge, TranscriptWrite},
-};
+use super::circuit::Advice;
+use super::circuit::Any;
+use super::circuit::Assignment;
+use super::circuit::Circuit;
+use super::circuit::Column;
+use super::circuit::ConstraintSystem;
+use super::circuit::Fixed;
+use super::circuit::FloorPlanner;
+use super::circuit::Instance;
+use super::circuit::Selector;
+use super::lookup;
+use super::permutation;
+use super::vanishing;
+use super::ChallengeBeta;
+use super::ChallengeGamma;
+use super::ChallengeTheta;
+use super::ChallengeX;
+use super::ChallengeY;
+use super::Error;
+use super::ProvingKey;
+use crate::arithmetic::eval_polynomial;
+use crate::arithmetic::BaseExt;
+use crate::arithmetic::CurveAffine;
+use crate::arithmetic::FieldExt;
+use crate::plonk::Assigned;
+use crate::plonk::Expression;
+use crate::poly::batch_invert_assigned;
+use crate::poly::commitment::Blind;
+use crate::poly::commitment::Params;
+use crate::poly::multiopen::ProverQuery;
+use crate::poly::multiopen::{self};
+use crate::poly::Coeff;
+use crate::poly::ExtendedLagrangeCoeff;
+use crate::poly::LagrangeCoeff;
+use crate::poly::Polynomial;
+use crate::poly::Rotation;
+use crate::poly::{self};
+use crate::transcript::EncodedChallenge;
+use crate::transcript::TranscriptWrite;
+
+use rand_core::impls;
+
+#[derive(Debug)]
+pub struct CountingRng(pub u64);
+
+impl RngCore for CountingRng {
+    fn next_u32(&mut self) -> u32 {
+        self.next_u64() as u32
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.0
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        impls::fill_bytes_via_next(self, dest)
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), rand_core::Error> {
+        Ok(self.fill_bytes(dest))
+    }
+}
 
 /// This creates a proof for the provided `circuit` when given the public
 /// parameters `params` and the proving key [`ProvingKey`] that was
@@ -51,9 +90,11 @@ pub fn create_proof<
     pk: &ProvingKey<C>,
     circuits: &[ConcreteCircuit],
     instances: &[&[&[C::Scalar]]],
-    mut rng: R,
+    mut _rng: R,
     transcript: &mut T,
 ) -> Result<(), Error> {
+    let mut rng = CountingRng(1);
+    
     for instance in instances.iter() {
         if instance.len() != pk.vk.cs.num_instance_columns {
             return Err(Error::InvalidInstances);
@@ -416,11 +457,14 @@ pub fn create_proof<
     let y: ChallengeY<_> = transcript.squeeze_challenge_scalar();
 
     let timer = start_timer!(|| "advice cosets");
-    let advice = advice.into_iter().map(|advice| AdviceSingle::<C> {
-        advice_values: None,
-        advice_polys: advice.advice_polys.clone(),
-        advice_cosets: None,
-    }).collect::<Vec<_>>();
+    let advice = advice
+        .into_iter()
+        .map(|advice| AdviceSingle::<C> {
+            advice_values: None,
+            advice_polys: advice.advice_polys.clone(),
+            advice_cosets: None,
+        })
+        .collect::<Vec<_>>();
     let advice = advice
         .into_iter()
         .map(|advice| AdviceSingle::<C> {
@@ -612,11 +656,7 @@ struct InstanceSingle<C: CurveAffine> {
     pub instance_cosets: Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>,
 }
 
-fn create_single_instances<
-    C: CurveAffine,
-    E: EncodedChallenge<C>,
-    T: TranscriptWrite<C, E>,
->(
+fn create_single_instances<C: CurveAffine, E: EncodedChallenge<C>, T: TranscriptWrite<C, E>>(
     params: &Params<C>,
     pk: &ProvingKey<C>,
     instances: &[&[&[C::Scalar]]],
@@ -694,10 +734,7 @@ fn create_single_instances<
 }
 
 /// generate and write witness to files
-pub fn create_witness<
-    C: CurveAffine,
-    ConcreteCircuit: Circuit<C::Scalar>,
->(
+pub fn create_witness<C: CurveAffine, ConcreteCircuit: Circuit<C::Scalar>>(
     params: &Params<C>,
     pk: &ProvingKey<C>,
     circuit: &ConcreteCircuit,
@@ -706,7 +743,14 @@ pub fn create_witness<
 ) -> Result<(), Error> {
     let meta = &pk.vk.cs;
     let unusable_rows_start = params.n as usize - (meta.blinding_factors() + 1);
-    AssignWitnessCollection::store_witness(params, pk, instances, unusable_rows_start, circuit, fd)?;
+    AssignWitnessCollection::store_witness(
+        params,
+        pk,
+        instances,
+        unusable_rows_start,
+        circuit,
+        fd,
+    )?;
     Ok(())
 }
 
@@ -740,8 +784,8 @@ pub fn create_proof_from_witness<
         pub advice_cosets: Option<Vec<Polynomial<C::Scalar, ExtendedLagrangeCoeff>>>,
     }
 
-    let advice: Vec<AdviceSingle<C>> =
-        instances.iter()
+    let advice: Vec<AdviceSingle<C>> = instances
+        .iter()
         .map(|_| -> Result<AdviceSingle<C>, Error> {
             let unusable_rows_start = params.n as usize - (meta.blinding_factors() + 1);
 
@@ -867,11 +911,14 @@ pub fn create_proof_from_witness<
     let y: ChallengeY<_> = transcript.squeeze_challenge_scalar();
 
     let timer = start_timer!(|| "advice cosets");
-    let advice = advice.into_iter().map(|advice| AdviceSingle::<C> {
-        advice_values: None,
-        advice_polys: advice.advice_polys.clone(),
-        advice_cosets: None,
-    }).collect::<Vec<_>>();
+    let advice = advice
+        .into_iter()
+        .map(|advice| AdviceSingle::<C> {
+            advice_values: None,
+            advice_polys: advice.advice_polys.clone(),
+            advice_cosets: None,
+        })
+        .collect::<Vec<_>>();
     let advice = advice
         .into_iter()
         .map(|advice| AdviceSingle::<C> {
