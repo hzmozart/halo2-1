@@ -33,7 +33,7 @@ core_affinity = "0.5.10"
 ark-std = { version = "0.3.0", features = ["print-trace"] }
 backtrace = { version = "0.3", optional = true }
 ec-gpu-gen = { git = "https://github.com/lanbones/ec-gpu", optional = true }
-pairing = { git = "https://github.com/lanbones/pairing", package = "pairing_bn256"}
+pairing = { git = "https://github.com/okx/pairing.git", package = "pairing_bn256", branch = "asm-opt" }
 rayon = "1.5.1"
 ff = "0.12"
 group = "0.12"
