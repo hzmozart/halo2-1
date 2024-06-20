@@ -5,8 +5,8 @@
 
 use super::{Coeff, LagrangeCoeff, Polynomial, MSM};
 use crate::arithmetic::{
-    best_fft, best_multiexp, best_multiexp_gpu_cond, parallelize, CurveAffine,
-    CurveExt, Engine, FieldExt, Group,
+    best_fft, best_multiexp, best_multiexp_gpu_cond, parallelize, CurveAffine, CurveExt, Engine,
+    FieldExt, Group,
 };
 use crate::helpers::CurveRead;
 
@@ -156,6 +156,11 @@ impl<C: CurveAffine> Params<C> {
     /// Getter for g generators
     pub fn get_g(&self) -> Vec<C> {
         self.g.clone()
+    }
+
+    /// Getter for g generators
+    pub fn get_g_lagrange(&self) -> &Vec<C> {
+        &self.g_lagrange
     }
 
     /// Writes params to a buffer.
